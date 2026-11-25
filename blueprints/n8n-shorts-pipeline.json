@@ -23,30 +23,112 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://api.apify.com/v2/acts/apify~instagram-reel-scraper/run-sync-get-dataset-items",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
+        "assignments": {
+          "assignments": [
             {
-              "name": "token",
-              "value": "={{$credentials.httpQueryAuth.value}}"
+              "id": "cfg-graph",
+              "name": "graphApiVersion",
+              "value": "={{ $env.GRAPH_API_VERSION || 'v21.0' }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-cap",
+              "name": "costCapUsd",
+              "value": "={{ Number($env.COST_CAP_USD || 1) }}",
+              "type": "number"
+            },
+            {
+              "id": "cfg-regen",
+              "name": "maxRegenerations",
+              "value": "={{ Number($env.MAX_REGENERATIONS || 2) }}",
+              "type": "number"
+            },
+            {
+              "id": "cfg-still",
+              "name": "maxStillPolls",
+              "value": "={{ Number($env.MAX_STILL_POLLS || 30) }}",
+              "type": "number"
+            },
+            {
+              "id": "cfg-clip",
+              "name": "maxClipPolls",
+              "value": "={{ Number($env.MAX_CLIP_POLLS || 40) }}",
+              "type": "number"
+            },
+            {
+              "id": "cfg-render",
+              "name": "maxRenderPolls",
+              "value": "={{ Number($env.MAX_RENDER_POLLS || 40) }}",
+              "type": "number"
+            },
+            {
+              "id": "cfg-container",
+              "name": "maxContainerPolls",
+              "value": "={{ Number($env.MAX_CONTAINER_POLLS || 30) }}",
+              "type": "number"
+            },
+            {
+              "id": "cfg-p-still",
+              "name": "costPerStillUsd",
+              "value": "={{ Number($env.COST_PER_STILL_USD || 0.03) }}",
+              "type": "number"
+            },
+            {
+              "id": "cfg-p-clip",
+              "name": "costPerClipUsd",
+              "value": "={{ Number($env.COST_PER_CLIP_USD || 0.10) }}",
+              "type": "number"
+            },
+            {
+              "id": "cfg-p-voice",
+              "name": "costVoiceUsd",
+              "value": "={{ Number($env.COST_VOICE_USD || 0.03) }}",
+              "type": "number"
+            },
+            {
+              "id": "cfg-p-render",
+              "name": "costRenderUsd",
+              "value": "={{ Number($env.COST_RENDER_USD || 0.08) }}",
+              "type": "number"
+            },
+            {
+              "id": "cfg-sources",
+              "name": "sourceUsernames",
+              "value": "={{ ($env.SOURCE_INSTAGRAM_USERNAMES || '').split(',').map(s => s.trim()).filter(Boolean) }}",
+              "type": "array"
             }
           ]
         },
+        "options": {}
+      },
+      "id": "n02",
+      "name": "Run config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        480,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/apify~instagram-reel-scraper/run-sync-get-dataset-items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ username: ['fieldnotes'], resultsLimit: 10 }) }}",
+        "jsonBody": "={{ JSON.stringify({ username: $json.sourceUsernames, resultsLimit: 10 }) }}",
         "options": {
           "timeout": 120000
         }
       },
-      "id": "n02",
-      "name": "Apify \u2014 scrape Reels",
+      "id": "n03",
+      "name": "Apify — scrape Reels",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        520,
+        720,
         280
       ],
       "credentials": {
@@ -63,25 +145,25 @@
       "parameters": {
         "jsCode": "const rows = items.map(i => i.json);\nconst ranked = rows.map(r => ({...r, engagement: ((r.likesCount||r.likes||0)+(r.commentsCount||r.comments||0))/Math.max(r.videoViewCount||r.views||1,1)})).sort((a,b)=>b.engagement-a.engagement);\nreturn ranked.map(json => ({json}));"
       },
-      "id": "n03",
+      "id": "n04",
       "name": "Rank by views / engagement",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        820,
+        960,
         280
       ]
     },
     {
       "parameters": {
-        "jsCode": "const staticData = $getWorkflowStaticData('global');\nstaticData.used = staticData.used || [];\nconst fresh = items.find(i => !staticData.used.includes(String(i.json.id||i.json.shortCode)));\nif (!fresh) return [{json:{newReel:false}}];\nconst id = String(fresh.json.id||fresh.json.shortCode);\nstaticData.used.push(id);\nreturn [{json:{...fresh.json, newReel:true, reelId:id}}];"
+        "jsCode": "// Read-only. The id is written by 'Write dedupe log' after a successful publish.\nconst data = $getWorkflowStaticData('global');\nconst seen = new Set([...(data.used || []), ...(data.posts || []).map(p => String(p.reelId))]);\nconst fresh = items.find(i => !seen.has(String(i.json.id||i.json.shortCode)));\nif (!fresh) return [{json:{newReel:false}}];\nconst id = String(fresh.json.id||fresh.json.shortCode);\nreturn [{json:{...fresh.json, newReel:true, reelId:id}}];"
       },
-      "id": "n04",
+      "id": "n05",
       "name": "Dedupe check",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1100,
+        1200,
         280
       ]
     },
@@ -90,38 +172,43 @@
         "conditions": {
           "options": {
             "caseSensitive": true,
-            "typeValidation": "strict"
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
           },
           "conditions": [
             {
-              "leftValue": "={{$json.newReel}}",
-              "rightValue": true,
+              "id": "new-reel",
+              "leftValue": "={{ $json.newReel }}",
               "operator": {
                 "type": "boolean",
-                "operation": "true"
-              }
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
             }
           ],
           "combinator": "and"
-        }
+        },
+        "options": {}
       },
-      "id": "n05",
+      "id": "n06",
       "name": "New Reel?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1380,
+        1440,
         280
       ]
     },
     {
       "parameters": {},
-      "id": "n06",
-      "name": "Already used \u2014 end",
+      "id": "n07",
+      "name": "Already used — end",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        1600,
+        1680,
         460
       ]
     },
@@ -130,21 +217,21 @@
         "method": "GET",
         "url": "={{$json.videoUrl || $json.video_url}}",
         "options": {
+          "timeout": 60000,
           "response": {
             "response": {
               "responseFormat": "file"
             }
-          },
-          "timeout": 60000
+          }
         }
       },
-      "id": "n07",
+      "id": "n08",
       "name": "Download source MP4",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         240,
-        560
+        760
       ],
       "retryOnFail": true,
       "maxTries": 3,
@@ -154,6 +241,8 @@
       "parameters": {
         "method": "POST",
         "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "contentType": "multipart-form-data",
         "bodyParameters": {
@@ -173,13 +262,13 @@
           "timeout": 60000
         }
       },
-      "id": "n08",
+      "id": "n09",
       "name": "Transcribe (Whisper)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        520,
-        560
+        480,
+        760
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -195,20 +284,22 @@
       "parameters": {
         "method": "POST",
         "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'llama-3.3-70b-versatile', response_format: {type:'json_object'}, messages: [{role:'system', content:'Write an original short. Never copy the transcript. Return JSON {hook, script, voiceover, scenes:[{prompt, narration}]}.'}, {role:'user', content: $json.text || ''} ] }) }}",
+        "jsonBody": "={{ JSON.stringify({ model: 'llama-3.3-70b-versatile', response_format: {type:'json_object'}, messages: [{role:'system', content:'Write an original short. Never copy the transcript. Return JSON {hook, script, voiceover, caption, scenes:[{prompt, narration}]}.'}, {role:'user', content: $('Transcribe (Whisper)').first().json.text || ''} ] }) }}",
         "options": {
           "timeout": 60000
         }
       },
-      "id": "n09",
+      "id": "n10",
       "name": "Script + scene prompts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        840,
-        560
+        720,
+        760
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -222,21 +313,113 @@
     },
     {
       "parameters": {
-        "fieldToSplitOut": "scenes"
+        "jsCode": "const raw = $json.choices?.[0]?.message?.content ?? '{}';\nlet script;\ntry { script = typeof raw === 'string' ? JSON.parse(raw) : raw; }\ncatch (error) { throw new Error('Script step did not return JSON'); }\nif (!Array.isArray(script.scenes) || script.scenes.length === 0) throw new Error('Script has no scenes');\nreturn [{ json: { reelId: $('Dedupe check').first().json.reelId, hook: script.hook, script: script.script, voiceover: script.voiceover, caption: script.caption || script.hook, scenes: script.scenes } }];"
       },
-      "id": "n10",
+      "id": "n11",
+      "name": "Parse script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Runs before every paid pass: the first one, and each regeneration.\n// Estimate is conservative: every pass is priced as stills + clips + voice + render.\nconst cfg = $('Run config').first().json;\nconst script = $('Parse script').last().json;\nconst regenTarget = $('Regeneration budget').isExecuted ? $('Regeneration budget').last().json.choice : 'first_pass';\nconst pass = $runIndex + 1;\nconst perPassUsd = script.scenes.length * (cfg.costPerStillUsd + cfg.costPerClipUsd) + cfg.costVoiceUsd + cfg.costRenderUsd;\nconst projectedUsd = Math.round(pass * perPassUsd * 100) / 100;\nreturn [{ json: { ...script, pass, regenTarget, projectedUsd, costCapUsd: cfg.costCapUsd, underCap: projectedUsd <= cfg.costCapUsd + 1e-9 } }];"
+      },
+      "id": "n12",
+      "name": "Cost cap check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "under-cap",
+              "leftValue": "={{ $json.underCap }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n13",
+      "name": "Under cost cap?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Cost cap reached: pass {{ $json.pass }} would bring the run to ${{ $json.projectedUsd }}, over the ${{ $json.costCapUsd }} cap (COST_CAP_USD). No paid call was made for this pass."
+      },
+      "id": "n14",
+      "name": "Cost cap reached",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        940
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "scenes",
+        "options": {}
+      },
+      "id": "n15",
       "name": "Scenes",
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
       "position": [
         240,
-        860
+        1240
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {
+          "reset": "={{ $node[\"Scene loop\"].context[\"done\"] === true }}"
+        }
+      },
+      "id": "n16",
+      "name": "Scene loop",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        480,
+        1240
       ]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "https://queue.fal.run/fal-ai/flux/dev",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ prompt: $json.prompt, image_size: 'portrait_16_9' }) }}",
@@ -244,13 +427,176 @@
           "timeout": 60000
         }
       },
-      "id": "n11",
+      "id": "n17",
       "name": "fal.ai Flux",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        480,
-        860
+        720,
+        1240
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "falApiKey",
+          "name": "fal.ai API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "id": "n18",
+      "name": "Wait 10s — still",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        1240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.status_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "n19",
+      "name": "Poll still status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        1240
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "falApiKey",
+          "name": "fal.ai API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Carry the submit response forward and count this poll.\nconst prev = $('Wait 10s — still').item.json;\nreturn { json: { ...prev, status: $json.status, attempt: (prev.attempt || 0) + 1 } };"
+      },
+      "id": "n20",
+      "name": "Count still poll",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        1240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "still-done",
+              "leftValue": "={{ $json.status }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "COMPLETED"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n21",
+      "name": "Still COMPLETED?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        1240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "still-left",
+              "leftValue": "={{ $json.attempt }}",
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              },
+              "rightValue": "={{ $('Run config').first().json.maxStillPolls }}"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n22",
+      "name": "Still tries left?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        1420
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Flux still not COMPLETED after {{ $json.attempt }} polls (last status: {{ $json.status }})."
+      },
+      "id": "n23",
+      "name": "Still timed out",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        1420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.response_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "n24",
+      "name": "Get still URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        1240
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -266,20 +612,22 @@
       "parameters": {
         "method": "POST",
         "url": "https://queue.fal.run/fal-ai/kling-video/v1/standard/image-to-video",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ prompt: $json.prompt, image_url: $json.image_url }) }}",
+        "jsonBody": "={{ JSON.stringify({ prompt: $('Scene loop').item.json.prompt, image_url: $json.images[0].url }) }}",
         "options": {
           "timeout": 60000
         }
       },
-      "id": "n12",
+      "id": "n25",
       "name": "fal.ai Kling / Veo",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        760,
-        860
+        720,
+        1720
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -296,30 +644,32 @@
         "amount": 30,
         "unit": "seconds"
       },
-      "id": "n13",
+      "id": "n26",
       "name": "Wait 30s",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        1040,
-        860
+        960,
+        1720
       ]
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "=https://queue.fal.run/requests/{{$json.request_id}}",
+        "url": "={{ $json.status_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 30000
         }
       },
-      "id": "n14",
+      "id": "n27",
       "name": "Poll fal status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1240,
-        860
+        1200,
+        1720
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -333,37 +683,193 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Carry the submit response forward and count this poll.\nconst prev = $('Wait 30s').item.json;\nreturn { json: { ...prev, status: $json.status, attempt: (prev.attempt || 0) + 1 } };"
+      },
+      "id": "n28",
+      "name": "Count clip poll",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        1720
+      ]
+    },
+    {
+      "parameters": {
         "conditions": {
           "options": {
             "caseSensitive": true,
-            "typeValidation": "loose"
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
           },
           "conditions": [
             {
-              "leftValue": "={{$json.status}}",
-              "rightValue": "COMPLETED",
+              "id": "clip-done",
+              "leftValue": "={{ $json.status }}",
               "operator": {
                 "type": "string",
                 "operation": "equals"
-              }
+              },
+              "rightValue": "COMPLETED"
             }
           ],
           "combinator": "and"
-        }
+        },
+        "options": {}
       },
-      "id": "n15",
+      "id": "n29",
       "name": "COMPLETED?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1500,
-        860
+        1680,
+        1720
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "clip-left",
+              "leftValue": "={{ $json.attempt }}",
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              },
+              "rightValue": "={{ $('Run config').first().json.maxClipPolls }}"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n30",
+      "name": "Clip tries left?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        1900
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Image-to-video clip not COMPLETED after {{ $json.attempt }} polls (last status: {{ $json.status }})."
+      },
+      "id": "n31",
+      "name": "Clip timed out",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        1900
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.response_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "n32",
+      "name": "Get clip URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        1720
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "falApiKey",
+          "name": "fal.ai API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const scene = $('Scene loop').item.json;\nif (!$json.video?.url) throw new Error('fal result has no video url');\nreturn { json: { prompt: scene.prompt, narration: scene.narration, clip_url: $json.video.url } };"
+      },
+      "id": "n33",
+      "name": "Scene clip",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        1720
+      ]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "clips",
+        "options": {}
+      },
+      "id": "n34",
+      "name": "Aggregate clips",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        240,
+        2200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "voice-needed",
+              "leftValue": "={{ $json.regenTarget }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              },
+              "rightValue": "redo_clips"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n35",
+      "name": "Voice needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        2380
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.elevenlabs.io/v1/text-to-speech/{{$env.ELEVENLABS_VOICE_ID}}",
+        "url": "=https://api.elevenlabs.io/v1/text-to-speech/{{$env.ELEVENLABS_VOICE_ID}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ text: $json.voiceover, model_id: 'eleven_multilingual_v2' }) }}",
@@ -371,13 +877,13 @@
           "timeout": 60000
         }
       },
-      "id": "n16",
+      "id": "n36",
       "name": "ElevenLabs TTS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        240,
-        1160
+        480,
+        2380
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -392,35 +898,38 @@
     {
       "parameters": {
         "mode": "combine",
-        "combineBy": "combineAll"
+        "combineBy": "combineAll",
+        "options": {}
       },
-      "id": "n17",
+      "id": "n37",
       "name": "Clips + voice",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
       "position": [
-        520,
-        1160
+        720,
+        2200
       ]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "https://api.creatomate.com/v1/renders",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ template_id: $env.CREATOMATE_TEMPLATE_ID, modifications: { Voice: $json.voice_url, Captions: $json.hook } }) }}",
+        "jsonBody": "={{ JSON.stringify({ template_id: $env.CREATOMATE_TEMPLATE_ID, modifications: { Voice: $('ElevenLabs TTS').last().json.voice_url, Captions: $('Parse script').last().json.hook, ...Object.fromEntries($json.clips.map((clip, index) => ['Clip-' + (index + 1), clip.clip_url])) } }) }}",
         "options": {
           "timeout": 60000
         }
       },
-      "id": "n18",
+      "id": "n38",
       "name": "Creatomate render",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        760,
-        1160
+        960,
+        2200
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -434,19 +943,35 @@
     },
     {
       "parameters": {
+        "amount": 15,
+        "unit": "seconds"
+      },
+      "id": "n39",
+      "name": "Wait 15s — render",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        2200
+      ]
+    },
+    {
+      "parameters": {
         "method": "GET",
-        "url": "=https://api.creatomate.com/v1/renders/{{$json.id}}",
+        "url": "=https://api.creatomate.com/v1/renders/{{ $json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 30000
         }
       },
-      "id": "n19",
-      "name": "Render ready?",
+      "id": "n40",
+      "name": "Poll render",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1040,
-        1160
+        1440,
+        2200
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -457,42 +982,154 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Carry the submit response forward and count this poll.\nconst prev = $('Wait 15s — render').item.json;\nreturn { json: { ...prev, status: $json.status, url: $json.url, attempt: (prev.attempt || 0) + 1 } };"
+      },
+      "id": "n41",
+      "name": "Count render poll",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        2200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "render-done",
+              "leftValue": "={{ $json.status }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "succeeded"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n42",
+      "name": "Render ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        2200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "render-left",
+              "leftValue": "={{ $json.attempt }}",
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              },
+              "rightValue": "={{ $('Run config').first().json.maxRenderPolls }}"
+            },
+            {
+              "id": "render-not-failed",
+              "leftValue": "={{ $json.status }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              },
+              "rightValue": "failed"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n43",
+      "name": "Render tries left?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        2380
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Creatomate render not ready after {{ $json.attempt }} polls (last status: {{ $json.status }})."
+      },
+      "id": "n44",
+      "name": "Render timed out",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        2380
+      ]
     },
     {
       "parameters": {
         "operation": "sendMessage",
         "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
-        "text": "={{$json.hook || 'Reel ready'}}",
+        "text": "={{ $('Parse script').last().json.hook || 'Reel ready' }}\n{{ $json.url }}",
         "replyMarkup": "inlineKeyboard",
         "inlineKeyboard": {
           "rows": [
             {
-              "row": [
-                {
-                  "text": "Approve",
-                  "additionalFields": {
-                    "callback_data": "approve"
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Approve",
+                    "additionalFields": {
+                      "url": "={{ $execution.resumeUrl }}?choice=approve"
+                    }
+                  },
+                  {
+                    "text": "Rewrite script",
+                    "additionalFields": {
+                      "url": "={{ $execution.resumeUrl }}?choice=rewrite_script"
+                    }
+                  },
+                  {
+                    "text": "Redo clips",
+                    "additionalFields": {
+                      "url": "={{ $execution.resumeUrl }}?choice=redo_clips"
+                    }
                   }
-                },
-                {
-                  "text": "Regenerate",
-                  "additionalFields": {
-                    "callback_data": "regenerate"
-                  }
-                }
-              ]
+                ]
+              }
             }
           ]
         },
-        "additionalFields": {}
+        "additionalFields": {
+          "appendAttribution": false
+        }
       },
-      "id": "n20",
+      "id": "n45",
       "name": "Send video + buttons",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1320,
-        1160
+        240,
+        2760
       ],
       "credentials": {
         "telegramApi": {
@@ -503,68 +1140,207 @@
     },
     {
       "parameters": {
+        "resume": "webhook",
+        "httpMethod": "GET",
+        "responseMode": "onReceived",
+        "limitWaitTime": true,
+        "limitType": "afterTimeInterval",
+        "resumeAmount": 24,
+        "resumeUnit": "hours",
+        "options": {}
+      },
+      "id": "n46",
+      "name": "Wait for tap",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        2760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One run of this node per approval round, so $runIndex is the number of\n// regenerations this execution has already done.\nconst cfg = $('Run config').first().json;\nconst tapped = $json.query?.choice || 'none';\nconst regenerationsUsed = $runIndex;\nconst wantsRegeneration = tapped === 'rewrite_script' || tapped === 'redo_clips';\nconst choice = wantsRegeneration && regenerationsUsed >= cfg.maxRegenerations ? 'cap_reached' : tapped;\nreturn [{ json: { choice, tapped, regenerationsUsed, maxRegenerations: cfg.maxRegenerations } }];"
+      },
+      "id": "n47",
+      "name": "Regeneration budget",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        2760
+      ]
+    },
+    {
+      "parameters": {
         "rules": {
           "values": [
             {
-              "outputKey": "Approve",
               "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
                 "conditions": [
                   {
-                    "leftValue": "={{$json.callback_data || $json.data}}",
-                    "rightValue": "approve",
+                    "id": "choice-approve",
+                    "leftValue": "={{ $json.choice }}",
                     "operator": {
                       "type": "string",
                       "operation": "equals"
-                    }
+                    },
+                    "rightValue": "approve"
                   }
-                ]
-              }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Approve"
             },
             {
-              "outputKey": "Regenerate",
               "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
                 "conditions": [
                   {
-                    "leftValue": "={{$json.callback_data || $json.data}}",
-                    "rightValue": "regenerate",
+                    "id": "choice-rewrite_script",
+                    "leftValue": "={{ $json.choice }}",
                     "operator": {
                       "type": "string",
                       "operation": "equals"
-                    }
+                    },
+                    "rightValue": "rewrite_script"
                   }
-                ]
-              }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Rewrite script"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "choice-redo_clips",
+                    "leftValue": "={{ $json.choice }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "redo_clips"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Redo clips"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "choice-cap_reached",
+                    "leftValue": "={{ $json.choice }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "cap_reached"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Regeneration cap"
             }
           ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
         }
       },
-      "id": "n21",
+      "id": "n48",
       "name": "Which button?",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
       "position": [
-        240,
-        1480
+        960,
+        2760
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
+        "text": "=Regeneration cap reached ({{ $json.maxRegenerations }} per run). Nothing was posted. The reel stays unused and can be picked up by a later run.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "n49",
+      "name": "Regeneration cap reached",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        2940
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegramBot",
+          "name": "Telegram bot"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "n50",
+      "name": "No answer — end",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        2940
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://graph.facebook.com/v21.0/{{$env.INSTAGRAM_USER_ID}}/media",
+        "url": "=https://graph.facebook.com/{{ $('Run config').first().json.graphApiVersion }}/{{$env.INSTAGRAM_USER_ID}}/media",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ media_type: 'REELS', video_url: $json.video_url, caption: $json.caption, share_to_feed: true }) }}",
+        "jsonBody": "={{ JSON.stringify({ media_type: 'REELS', video_url: $('Count render poll').last().json.url, caption: $('Parse script').last().json.caption, share_to_feed: true }) }}",
         "options": {
           "timeout": 60000
         }
       },
-      "id": "n22",
+      "id": "n51",
       "name": "IG container (REELS)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        560,
-        1400
+        240,
+        3240
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -578,8 +1354,24 @@
     },
     {
       "parameters": {
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "id": "n52",
+      "name": "Wait 10s — container",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        3240
+      ]
+    },
+    {
+      "parameters": {
         "method": "GET",
-        "url": "=https://graph.facebook.com/v21.0/{{$json.id}}",
+        "url": "=https://graph.facebook.com/{{ $('Run config').first().json.graphApiVersion }}/{{ $json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -593,13 +1385,13 @@
           "timeout": 30000
         }
       },
-      "id": "n23",
-      "name": "status_code = FINISHED?",
+      "id": "n53",
+      "name": "Poll container status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        880,
-        1400
+        720,
+        3240
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -613,22 +1405,126 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Carry the submit response forward and count this poll.\nconst prev = $('Wait 10s — container').item.json;\nreturn { json: { ...prev, status_code: $json.status_code, attempt: (prev.attempt || 0) + 1 } };"
+      },
+      "id": "n54",
+      "name": "Count container poll",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        3240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "container-done",
+              "leftValue": "={{ $json.status_code }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "FINISHED"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n55",
+      "name": "status_code = FINISHED?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        3240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "container-left",
+              "leftValue": "={{ $json.attempt }}",
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              },
+              "rightValue": "={{ $('Run config').first().json.maxContainerPolls }}"
+            },
+            {
+              "id": "container-not-error",
+              "leftValue": "={{ $json.status_code }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              },
+              "rightValue": "ERROR"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n56",
+      "name": "Container tries left?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        3420
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Instagram container not FINISHED after {{ $json.attempt }} polls (last status_code: {{ $json.status_code }}). Nothing was published."
+      },
+      "id": "n57",
+      "name": "Container timed out",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        3420
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
-        "url": "=https://graph.facebook.com/v21.0/{{$env.INSTAGRAM_USER_ID}}/media_publish",
+        "url": "=https://graph.facebook.com/{{ $('Run config').first().json.graphApiVersion }}/{{$env.INSTAGRAM_USER_ID}}/media_publish",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ creation_id: $('IG container (REELS)').item.json.id }) }}",
+        "jsonBody": "={{ JSON.stringify({ creation_id: $json.id }) }}",
         "options": {
           "timeout": 60000
         }
       },
-      "id": "n24",
+      "id": "n58",
       "name": "media_publish",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1180,
-        1400
+        1440,
+        3240
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -644,20 +1540,22 @@
       "parameters": {
         "method": "POST",
         "url": "https://open.tiktokapis.com/v2/post/publish/video/init/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ post_info: { title: $json.caption, privacy_level: 'SELF_ONLY' }, source_info: { source: 'FILE_UPLOAD', video_size: 1, chunk_size: 1, total_chunk_count: 1 }, dry_run: true }) }}",
+        "jsonBody": "={{ JSON.stringify({ post_info: { title: $('Parse script').last().json.caption, privacy_level: 'SELF_ONLY' }, source_info: { source: 'FILE_UPLOAD', video_size: 1, chunk_size: 1, total_chunk_count: 1 }, dry_run: true }) }}",
         "options": {
           "timeout": 30000
         }
       },
-      "id": "n25",
+      "id": "n59",
       "name": "TikTok init",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1460,
-        1400
+        1680,
+        3240
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -673,20 +1571,22 @@
       "parameters": {
         "method": "POST",
         "url": "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ snippet: { title: $json.caption, description: '#Shorts', categoryId: '22' }, status: { privacyStatus: 'private', selfDeclaredMadeForKids: false }, dry_run: true }) }}",
+        "jsonBody": "={{ JSON.stringify({ snippet: { title: $('Parse script').last().json.caption, description: '#Shorts', categoryId: '22' }, status: { privacyStatus: 'private', selfDeclaredMadeForKids: false }, dry_run: true }) }}",
         "options": {
           "timeout": 30000
         }
       },
-      "id": "n26",
+      "id": "n60",
       "name": "YouTube Shorts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1740,
-        1400
+        1920,
+        3240
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -700,31 +1600,46 @@
     },
     {
       "parameters": {
-        "jsCode": "const data = $getWorkflowStaticData('global');\ndata.posts = data.posts || [];\ndata.posts.push({ reelId: $json.reelId, permalink: $json.permalink || 'mock://post', at: new Date().toISOString() });\nreturn [{json:{logged:true, posts:data.posts.length}}];"
+        "jsCode": "// The only write to the used-reel list. It runs after the publish steps, so a\n// failed or abandoned run leaves the reel free for a later run.\nconst data = $getWorkflowStaticData('global');\ndata.used = data.used || [];\nconst reelId = String($('Dedupe check').first().json.reelId);\nif (!data.used.includes(reelId)) data.used.push(reelId);\nreturn [{ json: { reelId, dedupeLogged: true, usedCount: data.used.length } }];"
       },
-      "id": "n27",
+      "id": "n61",
+      "name": "Write dedupe log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        3420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $getWorkflowStaticData('global');\ndata.posts = data.posts || [];\nif (!data.posts.some(post => String(post.reelId) === String($json.reelId))) {\n  data.posts.push({ reelId: $json.reelId, permalink: $json.permalink || 'mock://post', at: new Date().toISOString() });\n}\nreturn [{json:{logged:true, reelId: $json.reelId, posts:data.posts.length}}];"
+      },
+      "id": "n62",
       "name": "Log the post",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1180,
-        1620
+        1920,
+        3420
       ]
     },
     {
       "parameters": {
         "operation": "sendMessage",
         "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
-        "text": "Posted. Mock adapters did not call Instagram, TikTok, or YouTube.",
-        "additionalFields": {}
+        "text": "Posted. TikTok and YouTube were sent with dry_run:true.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
       },
-      "id": "n28",
+      "id": "n63",
       "name": "Posted",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1460,
-        1620
+        2160,
+        3420
       ],
       "credentials": {
         "telegramApi": {
@@ -735,9 +1650,9 @@
     },
     {
       "parameters": {
-        "content": "Regenerate loops to Script + scene prompts (step 8) or fal.ai Kling / Veo (step 11). It does not rerun the scrape. Credentials are n8n credential refs, never raw keys. Social HTTP nodes send dry_run:true until a live client is approved.",
-        "height": 140,
-        "width": 360
+        "content": "## Daily Reels pipeline\nRun config is the one place for limits: COST_CAP_USD, MAX_REGENERATIONS, the four poll caps, GRAPH_API_VERSION and SOURCE_INSTAGRAM_USERNAMES. Credentials are n8n credential refs, never raw keys. A capped loop that runs out ends in a Stop and Error node, which fires the error workflow.",
+        "height": 160,
+        "width": 640
       },
       "id": "note1",
       "name": "Notes",
@@ -745,7 +1660,97 @@
       "typeVersion": 1,
       "position": [
         240,
-        80
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 1 · Ingest and dedupe\nDedupe check only reads. The write happens in lane 6.",
+        "height": 160,
+        "width": 420
+      },
+      "id": "note2",
+      "name": "Lane 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        960,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 2 · Understand, write, cost cap\nCost cap check runs before every paid pass, including each regeneration. Over the cap, the run stops before any paid call.",
+        "height": 130,
+        "width": 640
+      },
+      "id": "note3",
+      "name": "Lane 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 3 · One scene at a time: still, then clip\nFlux is submitted, polled until COMPLETED, and its image URL fetched before the image-to-video call. Both loops stop after a fixed number of polls.",
+        "height": 130,
+        "width": 640
+      },
+      "id": "note4",
+      "name": "Lane 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        1060
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 4 · Collect clips, voice, render\nAggregate clips turns the per-scene items into one item. Redo clips skips the voice call and reuses the last voiceover.",
+        "height": 130,
+        "width": 640
+      },
+      "id": "note5",
+      "name": "Lane 4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        2020
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 5 · Ask the human\nThree buttons resume this execution: Approve, Rewrite script, Redo clips. Rewrite script returns to lane 2, Redo clips to the cost cap check. Neither reruns the scrape. No tap in 24 hours ends the run.",
+        "height": 130,
+        "width": 640
+      },
+      "id": "note6",
+      "name": "Lane 5",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        2580
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 6 · Publish, then log\nTikTok and YouTube send dry_run:true. Write dedupe log is the only write to the used-reel list and runs last. Workflow static data is saved only for active (non-manual) executions.",
+        "height": 130,
+        "width": 640
+      },
+      "id": "note7",
+      "name": "Lane 6",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        3060
       ]
     }
   ],
@@ -754,14 +1759,25 @@
       "main": [
         [
           {
-            "node": "Apify \u2014 scrape Reels",
+            "node": "Run config",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Apify \u2014 scrape Reels": {
+    "Run config": {
+      "main": [
+        [
+          {
+            "node": "Apify — scrape Reels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify — scrape Reels": {
       "main": [
         [
           {
@@ -805,7 +1821,7 @@
         ],
         [
           {
-            "node": "Already used \u2014 end",
+            "node": "Already used — end",
             "type": "main",
             "index": 0
           }
@@ -838,40 +1854,121 @@
       "main": [
         [
           {
+            "node": "Parse script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse script": {
+      "main": [
+        [
+          {
+            "node": "Cost cap check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cost cap check": {
+      "main": [
+        [
+          {
+            "node": "Under cost cap?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Under cost cap?": {
+      "main": [
+        [
+          {
             "node": "Scenes",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Voice needed?",
+            "type": "main",
+            "index": 0
           }
-        ]
-      ]
-    },
-    "Scenes": {
-      "main": [
+        ],
         [
           {
-            "node": "fal.ai Flux",
+            "node": "Cost cap reached",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "fal.ai Flux": {
+    "Wait 10s — still": {
       "main": [
         [
           {
-            "node": "fal.ai Kling / Veo",
+            "node": "Poll still status",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "fal.ai Kling / Veo": {
+    "Poll still status": {
       "main": [
         [
           {
-            "node": "Wait 30s",
+            "node": "Count still poll",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count still poll": {
+      "main": [
+        [
+          {
+            "node": "Still COMPLETED?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still COMPLETED?": {
+      "main": [
+        [
+          {
+            "node": "Get still URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Still tries left?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still tries left?": {
+      "main": [
+        [
+          {
+            "node": "Wait 10s — still",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Still timed out",
             "type": "main",
             "index": 0
           }
@@ -893,6 +1990,17 @@
       "main": [
         [
           {
+            "node": "Count clip poll",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count clip poll": {
+      "main": [
+        [
+          {
             "node": "COMPLETED?",
             "type": "main",
             "index": 0
@@ -904,11 +2012,91 @@
       "main": [
         [
           {
-            "node": "ElevenLabs TTS",
+            "node": "Get clip URL",
             "type": "main",
             "index": 0
           }
         ],
+        [
+          {
+            "node": "Clip tries left?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clip tries left?": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Clip timed out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scenes": {
+      "main": [
+        [
+          {
+            "node": "Scene loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scene loop": {
+      "main": [
+        [
+          {
+            "node": "Aggregate clips",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "fal.ai Flux",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fal.ai Flux": {
+      "main": [
+        [
+          {
+            "node": "Wait 10s — still",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get still URL": {
+      "main": [
+        [
+          {
+            "node": "fal.ai Kling / Veo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fal.ai Kling / Veo": {
+      "main": [
         [
           {
             "node": "Wait 30s",
@@ -918,7 +2106,127 @@
         ]
       ]
     },
+    "Get clip URL": {
+      "main": [
+        [
+          {
+            "node": "Scene clip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scene clip": {
+      "main": [
+        [
+          {
+            "node": "Scene loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 15s — render": {
+      "main": [
+        [
+          {
+            "node": "Poll render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll render": {
+      "main": [
+        [
+          {
+            "node": "Count render poll",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count render poll": {
+      "main": [
+        [
+          {
+            "node": "Render ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render ready?": {
+      "main": [
+        [
+          {
+            "node": "Send video + buttons",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Render tries left?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render tries left?": {
+      "main": [
+        [
+          {
+            "node": "Wait 15s — render",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Render timed out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Voice needed?": {
+      "main": [
+        [
+          {
+            "node": "ElevenLabs TTS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Clips + voice",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
     "ElevenLabs TTS": {
+      "main": [
+        [
+          {
+            "node": "Clips + voice",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Aggregate clips": {
       "main": [
         [
           {
@@ -944,18 +2252,7 @@
       "main": [
         [
           {
-            "node": "Render ready?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Render ready?": {
-      "main": [
-        [
-          {
-            "node": "Send video + buttons",
+            "node": "Wait 15s — render",
             "type": "main",
             "index": 0
           }
@@ -963,6 +2260,28 @@
       ]
     },
     "Send video + buttons": {
+      "main": [
+        [
+          {
+            "node": "Wait for tap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for tap": {
+      "main": [
+        [
+          {
+            "node": "Regeneration budget",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Regeneration budget": {
       "main": [
         [
           {
@@ -988,10 +2307,53 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Cost cap check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Regeneration cap reached",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No answer — end",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
-    "IG container (REELS)": {
+    "Wait 10s — container": {
+      "main": [
+        [
+          {
+            "node": "Poll container status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll container status": {
+      "main": [
+        [
+          {
+            "node": "Count container poll",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count container poll": {
       "main": [
         [
           {
@@ -1007,6 +2369,42 @@
         [
           {
             "node": "media_publish",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Container tries left?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Container tries left?": {
+      "main": [
+        [
+          {
+            "node": "Wait 10s — container",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Container timed out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IG container (REELS)": {
+      "main": [
+        [
+          {
+            "node": "Wait 10s — container",
             "type": "main",
             "index": 0
           }
@@ -1036,6 +2434,17 @@
       ]
     },
     "YouTube Shorts": {
+      "main": [
+        [
+          {
+            "node": "Write dedupe log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write dedupe log": {
       "main": [
         [
           {
