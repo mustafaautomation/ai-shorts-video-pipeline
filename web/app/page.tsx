@@ -11,8 +11,8 @@ export default function HomePage() {
         <div>
           <h1>A topic becomes a reel.</h1>
           <p className="lede">
-            Write a 30–45 second short, hear it, and burn the words onto a vertical frame. Instagram,
-            TikTok, and YouTube stay mocked until a real account is approved. This is not client work.
+            A daily reel pipeline: scrape what performed, skip ids already used, write an original script,
+            and render a 1080×1920 MP4 in the browser. Nothing posts without Approve. This is not client work.
           </p>
         </div>
         <div className="phone">
@@ -27,9 +27,9 @@ export default function HomePage() {
       </section>
       <Studio />
       <p className="note">
-        Full rendering stays in the Python pipeline and in CI. This site only writes the script, then
-        optionally speaks it with the browser. Publishing adapters record the payload they would send
-        and do not call the platforms.
+        The phone starts on a reel the Python CLI rendered with ffmpeg. Run the pipeline and it is replaced
+        by an MP4 this browser encoded. The CLI path is the worker. This page is the free, keyless demo.
+        Instagram, TikTok, and YouTube receipts are mock payloads.
       </p>
     </main>
   );

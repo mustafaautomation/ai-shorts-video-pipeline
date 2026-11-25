@@ -1,0 +1,59 @@
+{
+  "name": "Daily Reels \u2014 error alert",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "n01",
+      "name": "On any failed node",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
+        "text": "=Step failed: {{$json.node?.name || $json.execution?.error?.message || 'unknown'}}\n{{$json.execution?.error?.message || ''}}",
+        "additionalFields": {}
+      },
+      "id": "n02",
+      "name": "Alert \u2014 step failed",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        560,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegramBot",
+          "name": "Telegram bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "On any failed node": {
+      "main": [
+        [
+          {
+            "node": "Alert \u2014 step failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

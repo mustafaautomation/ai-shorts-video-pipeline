@@ -1,41 +1,83 @@
 # AI Shorts Video Pipeline
 
-Portfolio demo by [Mustafa](https://github.com/mustafaautomation). It is not client work and it does not post to a real account.
-
-Give it a topic. It writes a 30–45 second script, speaks it, burns word-synced captions onto a 1080×1920 reel, and records the exact Instagram Reels, TikTok, and YouTube Shorts requests it would send. Those requests are saved as JSON. Nothing is uploaded.
+Portfolio demo by [Mustafa](https://github.com/mustafaautomation). One original Reel a day, and nothing posts without a human tap. Not client work.
 
 ![Sample reel, first few seconds](docs/demo-reel.gif)
 
-The clip above is the opening of [docs/demo-reel.mp4](docs/demo-reel.mp4). That file was rendered with Edge TTS. The script clock for it is about 30 seconds; Aria reads it in about 26. CI renders the same shape of reel with the offline voice so the build does not depend on Microsoft.
+[Download the vertical MP4](docs/demo-reel.mp4). GitHub shows the GIF above. The MP4 is the file.
+
+![System design](docs/architecture.png)
+
+![n8n canvas](docs/n8n-canvas.png)
+
+## Free path vs keys
+
+| Stage | Free default | Named provider, only if the key is set |
+| --- | --- | --- |
+| Scrape | Bundled sample reels | `APIFY_TOKEN` → `apify~instagram-reel-scraper` |
+| Dedupe | Local used-id store | same store |
+| Transcribe | Fixture transcript | `GROQ_API_KEY` → whisper-large-v3, or `OPENAI_API_KEY` → whisper-1 |
+| Script | Offline writer, original JSON | Groq, then Gemini |
+| Stills | Gradient plates | `FAL_KEY` → Flux |
+| Motion | Ken Burns | `FAL_KEY` → Kling, or `FAL_VIDEO_MODEL=veo` |
+| Voice | Edge TTS, else a timed tone bed | `ELEVENLABS_API_KEY` |
+| Render | Browser encoder on the site, ffmpeg in the CLI | `CREATOMATE_API_KEY` |
+| Approval | On-page Approve / Regenerate | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
+| Publish | Mock IG REELS + TikTok + YouTube payloads | Still mock until a live client is approved |
+
+`COST_CAP_USD` stops paid calls. Free calls cost zero.
+
+## Quickstart
+
+Python 3.11+, ffmpeg, and the DejaVu fonts.
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+shorts-pipeline run --topic "How to explain a hard idea" --script-provider offline --voice-provider offline --publish --out out/reel.mp4
+```
+
+The site in `web/` is what Vercel builds. Set the project root to `web`. It does not call Python or ffmpeg.
+
+```bash
+cd web && npm install && npm run build && npm start
+```
+
+## Web render vs CLI render
+
+The CLI (`shorts-pipeline run`) uses ffmpeg on the machine: Edge TTS or the offline tone bed, ASS captions, 1080×1920 H.264. CI uses that path with no keys and uploads the MP4.
+
+The website encodes the MP4 in the browser with WebCodecs (H.264 + AAC) after `/api/voice` returns speech. Captions are burned into the frames. Ken Burns plates stand in for paid image-to-video. Approve shows the mock Instagram, TikTok, and YouTube payloads. Regenerate script rewrites only the words. Regenerate scene 2 redraws only that scene.
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-  topic[Topic] --> writer[Script writer]
-  writer --> groq[Groq Llama]
-  writer --> gemini[Gemini]
-  writer --> offline[Offline writer]
-  groq --> voice[Voiceover]
-  gemini --> voice
-  offline --> voice
-  voice --> edge[Edge TTS]
-  voice --> tone[Offline tone bed]
-  edge --> render[ffmpeg 1080x1920]
-  tone --> render
-  pexels[Pexels b-roll] --> render
-  plates[Generated plates] --> render
-  render --> reel[Vertical MP4]
-  reel --> ig[Instagram mock]
-  reel --> tt[TikTok mock]
-  reel --> yt[YouTube Shorts mock]
-  n8n[n8n or Make] --> api[HTTP API]
-  api --> writer
+flowchart TD
+  cron[Schedule 09:00] --> scrape[Apify or fixtures]
+  scrape --> rank[Rank by engagement]
+  rank --> dedupe[Dedupe used ids]
+  dedupe -->|new| whisper[Whisper or fixture transcript]
+  dedupe -->|seen| stop[End run]
+  whisper --> script[Original script and scenes]
+  script --> stills[Flux or gradient plates]
+  stills --> motion[Kling or Ken Burns]
+  motion --> poll{Poll completed or timeout}
+  poll -->|no| motion
+  poll -->|yes| voice[ElevenLabs or Edge TTS]
+  voice --> render[Creatomate or ffmpeg or browser]
+  render --> human[Approve or Regenerate]
+  human -->|regenerate script| script
+  human -->|regenerate one scene| stills
+  human -->|approve| ig[IG REELS container]
+  ig --> wait[Poll status_code FINISHED]
+  wait --> publish[media_publish plus TikTok and Shorts mock]
+  publish --> log[Log the post]
+  fail[Error trigger] --> alert[Alert with the failed step]
 ```
 
-Script order is Groq, then Gemini, then a deterministic offline writer. Voice order is Edge TTS, then a local tone bed that still has a word clock. Pictures come from Pexels when `PEXELS_API_KEY` is set, and from generated gradient plates otherwise. Publish adapters always stop before the network unless you explicitly turn dry-run off, and even then they refuse instead of posting.
+Sync calls return immediately. Fal, Creatomate, and the Instagram container are submit-then-poll, with a timeout and exponential backoff. The full page is [docs/architecture.html](docs/architecture.html). The n8n import is [blueprints/n8n-shorts-pipeline.json](blueprints/n8n-shorts-pipeline.json) and the error workflow is [blueprints/n8n-error-workflow.json](blueprints/n8n-error-workflow.json).
 
-## Quickstart
+## CLI details
 
 Python 3.11+, ffmpeg, and the DejaVu fonts.
 

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Daily Instagram Reels Pipeline — architecture</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "IBM Plex Sans", sans-serif; background: #e8edf4; color: #0f172a; }
+  .page { width: 1400px; margin: 0 auto; padding: 28px 32px 24px; }
+  header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid #232f3e; padding-bottom: 10px; }
+  .eyebrow { letter-spacing: 0.18em; text-transform: uppercase; color: #d97706; font-size: 12px; font-weight: 650; }
+  h1 { font-size: 34px; letter-spacing: -0.03em; color: #232f3e; }
+  h1 em { font-style: normal; color: #ff9900; }
+  .right { text-align: right; color: #475569; font-size: 13px; }
+  .layout { display: flex; gap: 16px; margin-top: 16px; }
+  .board { flex: 1; position: relative; }
+  .zone { background: #fff; border: 1.4px solid #c5cdd8; border-radius: 10px; padding: 28px 14px 14px; margin-bottom: 12px; position: relative; }
+  .tab { position: absolute; top: 0; left: 14px; background: #232f3e; color: #fff; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; padding: 3px 10px 4px; border-radius: 0 0 6px 6px; }
+  .tab.api { background: #1e3a5f; } .tab.store { background: #334155; } .tab.human { background: #92400e; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .card { background: #f7f9fc; border: 1px solid #d0d7e2; border-radius: 8px; padding: 10px 12px; min-width: 140px; flex: 1; }
+  .kicker { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 650; }
+  .name { font-weight: 650; font-size: 15px; }
+  .sub { color: #64748b; font-size: 12px; }
+  .k-orange { color: #c2410c; } .k-blue { color: #1d4ed8; } .k-violet { color: #7c3aed; }
+  .k-green { color: #0f766e; } .k-sky { color: #0369a1; } .k-pink { color: #be185d; } .k-amber { color: #92400e; }
+  .num { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #ff9900; color: #232f3e; font-size: 11px; font-weight: 700; margin-right: 6px; }
+  .panel { width: 280px; background: #232f3e; color: #f8fafc; border-radius: 10px; padding: 16px; }
+  .panel h2 { color: #ff9900; letter-spacing: 0.16em; font-size: 12px; text-transform: uppercase; margin-bottom: 8px; }
+  .panel p, .panel li { color: #cbd5e1; font-size: 13px; line-height: 1.35; }
+  .panel li { margin: 8px 0; }
+  .strip { display: flex; gap: 6px; background: #fff; border: 1.4px solid #c5cdd8; border-radius: 10px; padding: 10px; margin-top: 12px; }
+  .step { flex: 1; font-size: 12px; }
+  .step b { display: block; }
+  .step span { color: #64748b; }
+  .legend { margin-top: 10px; color: #475569; font-size: 12px; display: flex; gap: 16px; }
+  .phone { background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px; padding: 10px 12px; }
+  .btn { display: inline-block; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; margin-right: 4px; }
+  .ok { background: #15803d; } .regen { background: #b45309; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div>
+      <div class="eyebrow">Daily Instagram Reels Pipeline</div>
+      <h1>System design <em>architecture</em></h1>
+    </div>
+    <div class="right"><strong style="color:#232f3e">Portfolio demo · Mustafa</strong><br>Approval-gated. Nothing posts without a human tap.</div>
+  </header>
+  <div class="layout">
+    <div class="board">
+      <div class="zone">
+        <div class="tab">Trigger / orchestration</div>
+        <div class="row">
+          <div class="card"><div class="kicker k-orange"><span class="num">1</span>Schedule</div><div class="name">09:00 daily</div><div class="sub">cron 0 9 * * *</div></div>
+          <div class="card"><div class="kicker" style="color:#b91c1c">Error trigger</div><div class="name">Separate workflow</div><div class="sub">Alerts if any node fails</div></div>
+          <div class="card"><div class="kicker">Credentials</div><div class="name">Keys stay in n8n</div><div class="sub">Never hardcoded in nodes</div></div>
+        </div>
+      </div>
+      <div class="zone">
+        <div class="tab api">External APIs</div>
+        <div class="row">
+          <div class="card"><div class="kicker k-blue"><span class="num">2</span>Data</div><div class="name">Apify</div><div class="sub">apify~instagram-reel-scraper. Free default: bundled fixtures.</div></div>
+          <div class="card"><div class="kicker k-violet"><span class="num">4</span>Understand</div><div class="name">Whisper + LLM</div><div class="sub">Groq whisper-large-v3 and Groq/Gemini/offline script.</div></div>
+          <div class="card"><div class="kicker k-orange"><span class="num">6</span>Media</div><div class="name">Flux · Kling / Veo</div><div class="sub">fal.ai when FAL_KEY is set. Else plates + Ken Burns.</div></div>
+          <div class="card"><div class="kicker k-violet"><span class="num">8</span>Voice</div><div class="name">ElevenLabs</div><div class="sub">Else Edge TTS, else a timed tone bed.</div></div>
+          <div class="card"><div class="kicker k-green"><span class="num">9</span>Render</div><div class="name">Creatomate</div><div class="sub">Else ffmpeg (CLI) or the browser encoder.</div></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div class="card"><div class="kicker k-sky"><span class="num">10</span>Messaging</div><div class="name">Telegram</div><div class="sub">Approve / Regenerate when the bot token and chat id are set. Else the on-page card.</div></div>
+          <div class="card"><div class="kicker k-pink">Social</div><div class="name">Instagram, TikTok, Shorts</div><div class="sub">REELS container, poll FINISHED, media_publish. Always dry-run in this demo.</div></div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="zone" style="flex:1">
+          <div class="tab store">Storage</div>
+          <div class="card"><div class="kicker"><span class="num">3</span>Dedupe and run log</div><div class="name">Used reel ids</div><div class="sub">Claim once. A later run skips that id and will not post twice.</div></div>
+        </div>
+        <div class="zone" style="flex:1">
+          <div class="tab human">The human</div>
+          <div class="phone">
+            <div class="kicker k-amber">Phone</div>
+            <div class="name">Approve or Regenerate</div>
+            <div class="sub">Regenerate rewrites the script, or one scene. Not the whole day.</div>
+            <div style="margin-top:8px"><span class="btn ok">Approve</span><span class="btn regen">Regenerate</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="strip">
+        <div class="step"><b>1 Start</b><span>09:00</span></div>
+        <div class="step"><b>2 Scrape</b><span>Apify or fixtures</span></div>
+        <div class="step"><b>3 Dedupe</b><span>Skip used ids</span></div>
+        <div class="step"><b>4 Transcribe</b><span>Whisper</span></div>
+        <div class="step"><b>5 Script</b><span>Original JSON</span></div>
+        <div class="step"><b>6 Stills</b><span>Flux or plates</span></div>
+        <div class="step"><b>7 Animate</b><span>Kling or Ken Burns</span></div>
+        <div class="step"><b>8 Voice</b><span>Edge TTS</span></div>
+        <div class="step"><b>9 Render</b><span>9:16 captions</span></div>
+        <div class="step"><b>10 Approve</b><span>Then mock publish</span></div>
+      </div>
+      <div class="legend">
+        <span>Solid arrow — synchronous HTTP</span>
+        <span>Dashed arrow — submit, then poll (fal, Creatomate, Instagram)</span>
+      </div>
+    </div>
+    <aside class="panel">
+      <h2>Reliability</h2>
+      <p>A slow render or a failed call cannot skip the day, and cannot post twice.</p>
+      <ul>
+        <li><b>Retries with backoff.</b> HTTP steps retry timeouts and 5xx. The wait doubles.</li>
+        <li><b>Timeouts.</b> Each poll loop has a hard cap.</li>
+        <li><b>Cost cap per run.</b> Paid image, video, and voice calls stop at COST_CAP_USD. Free calls cost zero.</li>
+        <li><b>Alerting.</b> A separate Error Trigger workflow names the failed step.</li>
+        <li><b>Idempotency.</b> Used reel ids and posted ids are stored before a retry can repeat them.</li>
+      </ul>
+    </aside>
+  </div>
+</div>
+</body>
+</html>

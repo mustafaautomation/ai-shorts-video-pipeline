@@ -191,9 +191,7 @@ def compose_original(topic: str, inspiration: ReelCandidate, *, variant: int = 0
         Scene(
             index=index,
             narration=part,
-            prompt=(
-                "Vertical 9:16 still, no letters, cinematic light, one clear subject: " + part
-            ),
+            prompt=("Vertical 9:16 still, no letters, cinematic light, one clear subject: " + part),
         )
         for index, part in enumerate(parts[:6])
     ]
