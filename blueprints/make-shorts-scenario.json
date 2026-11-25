@@ -1,0 +1,78 @@
+{
+  "name": "AI Shorts — topic to mock publish",
+  "flow": [
+    {
+      "id": 1,
+      "module": "gateway:CustomWebHook",
+      "version": 1,
+      "parameters": {
+        "hook": 1,
+        "maxResults": 1
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 0, "y": 0 },
+        "restore": {
+          "parameters": {
+            "hook": { "data": { "editable": "true" }, "label": "Topic webhook" }
+          }
+        },
+        "expect": [
+          { "name": "topic", "type": "text", "label": "Topic" },
+          { "name": "scheduled_at", "type": "text", "label": "Schedule (optional ISO time)" }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": {
+        "handleErrors": true,
+        "useNewZLibDeCompress": true
+      },
+      "mapper": {
+        "url": "{{var.shorts_api_base}}/v1/pipeline",
+        "method": "post",
+        "headers": [
+          { "name": "Content-Type", "value": "application/json" }
+        ],
+        "bodyType": "raw",
+        "contentType": "application/json",
+        "body": "{\"topic\":\"{{1.topic}}\",\"script_provider\":\"auto\",\"voice_provider\":\"auto\",\"publish\":true,\"dry_run\":true,\"scheduled_at\":{{ifempty(1.scheduled_at, \"null\")}}}",
+        "parseResponse": true,
+        "timeout": 180
+      },
+      "metadata": {
+        "designer": { "x": 300, "y": 0 },
+        "expect": [
+          { "name": "video_path", "type": "text" },
+          { "name": "receipts", "type": "array" },
+          { "name": "script", "type": "collection" }
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "version": 1,
+    "instant": true,
+    "scenario": {
+      "roundtrips": 1,
+      "maxErrors": 3,
+      "autoCommit": true,
+      "autoCommitTriggerLast": true,
+      "sequential": false,
+      "confidential": false,
+      "dataloss": false,
+      "dlq": false,
+      "freshVariables": false
+    },
+    "designer": { "orphans": [] },
+    "notes": [
+      {
+        "moduleId": 2,
+        "content": "Portfolio demo. Create a scenario variable shorts_api_base, for example http://127.0.0.1:8080, and run shorts-pipeline serve. dry_run true means the three platform adapters save their payloads and do not post. CLI equivalent: shorts-pipeline run --topic \"...\" --publish"
+      }
+    ]
+  }
+}

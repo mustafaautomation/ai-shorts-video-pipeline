@@ -1,0 +1,79 @@
+{
+  "name": "AI Shorts — topic to mock publish",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-shorts",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "b1c0e0a0-0000-4000-8000-000000000001",
+      "name": "Topic webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "ai-shorts-topic"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SHORTS_API_BASE}}/v1/pipeline",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ topic: $json.body.topic || $json.topic, script_provider: 'auto', voice_provider: 'auto', publish: true, dry_run: true, scheduled_at: $json.body.scheduled_at || null }) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "b1c0e0a0-0000-4000-8000-000000000002",
+      "name": "Generate and render",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, 300]
+    },
+    {
+      "parameters": {
+        "content": "## Portfolio demo\n\nPOST `{ \"topic\": \"how to explain a hard idea\" }` to this webhook.\n\nThe pipeline writes the script, voiceover, vertical MP4, and mock Instagram, TikTok, and YouTube receipts. `dry_run` stays true so nothing is posted.\n\nSet `SHORTS_API_BASE` on the n8n instance, for example `http://127.0.0.1:8080`. Start the API with `shorts-pipeline serve`.\n\nThe same job from a shell:\n\n`shorts-pipeline run --topic \"how to explain a hard idea\" --publish`",
+        "height": 360,
+        "width": 420
+      },
+      "id": "b1c0e0a0-0000-4000-8000-000000000003",
+      "name": "How to run",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 40]
+    }
+  ],
+  "connections": {
+    "Topic webhook": {
+      "main": [
+        [
+          {
+            "node": "Generate and render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
