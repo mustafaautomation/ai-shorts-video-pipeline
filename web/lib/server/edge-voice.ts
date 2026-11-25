@@ -4,13 +4,13 @@
  * The Sec-MS-GEC value is the v2 token the current service expects.
  */
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import WebSocket from "ws";
 
+import { secMsGecV2 } from "./sec-ms-gec.mjs";
 import type { WordMark } from "./offline-voice";
 
 const TRUSTED = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
-const WIN_EPOCH = 11644473600;
 const VERSION = "2-143.0.3650.75";
 
 export async function synthesizeEdge(text: string): Promise<{
@@ -27,16 +27,6 @@ export async function synthesizeEdge(text: string): Promise<{
   return { audio, words, duration };
 }
 
-function secMsGec(unixSeconds = Date.now() / 1000): string {
-  let ticks = unixSeconds + WIN_EPOCH;
-  ticks -= ticks % 300;
-  ticks *= 1e9 / 100;
-  const material = `${ticks.toFixed(0)}${TRUSTED}`;
-  // v1 digest is what older clients sent. The service now wants the v2
-  // "cs64-sha256" form produced by edge-tts. We send both attempts from speak().
-  return createHash("sha256").update(material, "ascii").digest("hex").toUpperCase();
-}
-
 async function speak(text: string, chunks: Buffer[], words: WordMark[]): Promise<void> {
   const escaped = text
     .replaceAll("&", "&amp;")
@@ -49,7 +39,7 @@ async function speak(text: string, chunks: Buffer[], words: WordMark[]): Promise
     `<voice name='${voice}'><prosody pitch='+0Hz' rate='+0%' volume='+0%'>${escaped}</prosody></voice></speak>`;
   const errors: string[] = [];
   try {
-    await session(secMsGec(), ssml, chunks, words);
+    await session(secMsGecV2(), ssml, chunks, words);
     return;
   } catch (error) {
     errors.push(error instanceof Error ? error.message : "edge failed");
@@ -57,7 +47,7 @@ async function speak(text: string, chunks: Buffer[], words: WordMark[]): Promise
   // Clock skew: retry with the server date if the first handshake was rejected.
   const skewed = await serverSkewSeconds();
   if (skewed !== 0) {
-    await session(secMsGec(Date.now() / 1000 + skewed), ssml, chunks, words);
+    await session(secMsGecV2(Date.now() / 1000 + skewed), ssml, chunks, words);
     return;
   }
   throw new Error(errors.join("; ") || "edge failed");
