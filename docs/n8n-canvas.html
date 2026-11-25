@@ -31,8 +31,9 @@
     <div class="nd" style="--c:#6b7280"><div class="t">Set</div><div class="n">Run config</div><div class="a">caps · Graph API version</div></div>
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Apify — scrape Reels</div><div class="a">apify~instagram-reel-scraper</div></div>
     <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Rank by engagement</div><div class="a">(likes+comments)/views</div></div>
-    <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Dedupe check</div><div class="a">reads used reel ids</div></div>
+    <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Dedupe check</div><div class="a">skips posted · abandoned · over-tried</div></div>
     <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">New Reel?</div><div class="a">false → end</div></div>
+    <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Count reel attempt</div><div class="a">MAX_REEL_ATTEMPTS</div></div>
   </div>
   <div class="lane">2 · Understand, write, cost cap</div>
   <div class="row">
@@ -80,23 +81,26 @@
   </div>
   <div class="lane">5 · Ask the human</div>
   <div class="row">
-    <div class="nd" style="--c:#2ca5e0"><div class="t">Telegram</div><div class="n">Send video + buttons</div><div class="a">Approve / Rewrite script / Redo clips</div></div>
+    <div class="nd" style="--c:#2ca5e0"><div class="t">Telegram</div><div class="n">Send video + buttons</div><div class="a">Approve / Rewrite script / Redo clips / Reject</div></div>
     <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait for tap</div><div class="a">resume URL · 24 h limit</div></div>
     <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Regeneration budget</div><div class="a">MAX_REGENERATIONS per run</div></div>
-    <div class="nd" style="--c:#00c571"><div class="t">Switch</div><div class="n">Which button?</div><div class="a">approve · script · clips · cap · none</div></div>
-    <div class="nd" style="--c:#2ca5e0"><div class="t">Telegram</div><div class="n">Regeneration cap reached</div><div class="a">ends the run</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">Switch</div><div class="n">Which button?</div><div class="a">approve · script · clips · cap · reject · none</div></div>
+    <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Log abandoned reel</div><div class="a">cap or reject</div></div>
+    <div class="nd" style="--c:#2ca5e0"><div class="t">Telegram</div><div class="n">Reel abandoned</div><div class="a">ends the run</div></div>
   </div>
   <div class="lane">6 · Publish, then log</div>
   <div class="row">
-    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">IG container (REELS)</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Dry run?</div><div class="a">PUBLISH_DRY_RUN, default true</div></div>
+    <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Mock publish (dry run)</div><div class="a">nothing sent</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">IG container (REELS)</div><div class="a">live only</div></div>
     <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait 10s — container</div></div>
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Poll container status</div></div>
     <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Count container poll</div></div>
     <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">status_code = FINISHED?</div><div class="a">no → tries left?</div></div>
     <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Container tries left?</div><div class="a">yes → wait · no → stop</div></div>
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">media_publish</div></div>
-    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">TikTok init</div><div class="a">dry_run</div></div>
-    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">YouTube Shorts</div><div class="a">dry_run</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">TikTok init</div><div class="a">live only</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">YouTube Shorts</div><div class="a">live only</div></div>
     <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Write dedupe log</div><div class="a">only write of used ids</div></div>
     <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Log the post</div></div>
   </div>
