@@ -28,41 +28,76 @@
   <div class="lane">1 · Ingest and dedupe</div>
   <div class="row">
     <div class="nd" style="--c:#ff9900"><div class="t">Schedule</div><div class="n">09:00 daily</div><div class="a">cron 0 9 * * *</div></div>
+    <div class="nd" style="--c:#6b7280"><div class="t">Set</div><div class="n">Run config</div><div class="a">caps · Graph API version</div></div>
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Apify — scrape Reels</div><div class="a">apify~instagram-reel-scraper</div></div>
     <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Rank by engagement</div><div class="a">(likes+comments)/views</div></div>
-    <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Dedupe check</div><div class="a">used reel ids</div></div>
+    <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Dedupe check</div><div class="a">reads used reel ids</div></div>
     <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">New Reel?</div><div class="a">false → end</div></div>
   </div>
-  <div class="lane">2 · Understand and write</div>
+  <div class="lane">2 · Understand, write, cost cap</div>
   <div class="row">
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Download source MP4</div></div>
     <div class="nd" style="--c:#10b981"><div class="t">HTTP</div><div class="n">Transcribe (Whisper)</div><div class="a">whisper-large-v3</div></div>
     <div class="nd" style="--c:#a78bfa"><div class="t">LLM</div><div class="n">Script + scene prompts</div><div class="a">{hook, voiceover, scenes[]}</div></div>
+    <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Parse script</div></div>
+    <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Cost cap check</div><div class="a">every paid pass · COST_CAP_USD</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Under cost cap?</div><div class="a">no → stop with error</div></div>
   </div>
-  <div class="lane">3 · Visuals, then poll</div>
+  <div class="lane">3 · One scene at a time: still, then clip</div>
   <div class="row">
     <div class="nd" style="--c:#00bb88"><div class="t">Split</div><div class="n">Scenes</div></div>
-    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">fal.ai Flux</div></div>
-    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">fal.ai Kling / Veo</div></div>
+    <div class="nd" style="--c:#00bb88"><div class="t">Loop</div><div class="n">Scene loop</div><div class="a">one scene per pass</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">fal.ai Flux</div><div class="a">submit</div></div>
+    <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait 10s — still</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Poll still status</div></div>
+    <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Count still poll</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Still COMPLETED?</div><div class="a">no → tries left?</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Still tries left?</div><div class="a">yes → wait · no → stop</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Get still URL</div></div>
+  </div>
+  <div class="row">
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">fal.ai Kling / Veo</div><div class="a">needs the still URL</div></div>
     <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait 30s</div></div>
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Poll fal status</div></div>
-    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">COMPLETED?</div><div class="a">no → wait, with timeout</div></div>
+    <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Count clip poll</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">COMPLETED?</div><div class="a">no → tries left?</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Clip tries left?</div><div class="a">yes → wait · no → stop</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Get clip URL</div></div>
+    <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Scene clip</div><div class="a">→ back to Scene loop</div></div>
   </div>
-  <div class="lane">4 · Voice, render, ask</div>
+  <div class="lane">4 · Collect clips, voice, render</div>
   <div class="row">
+    <div class="nd" style="--c:#00bb88"><div class="t">Aggregate</div><div class="n">Aggregate clips</div><div class="a">all scenes → one item</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Voice needed?</div><div class="a">skipped on Redo clips</div></div>
     <div class="nd" style="--c:#ef4444"><div class="t">HTTP</div><div class="n">ElevenLabs TTS</div><div class="a">else Edge TTS</div></div>
     <div class="nd" style="--c:#00bb88"><div class="t">Merge</div><div class="n">Clips + voice</div></div>
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Creatomate render</div><div class="a">else browser / ffmpeg</div></div>
-    <div class="nd" style="--c:#2ca5e0"><div class="t">Telegram</div><div class="n">Send video + buttons</div><div class="a">Approve / Regenerate</div></div>
+    <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait 15s — render</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Poll render</div></div>
+    <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Count render poll</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Render ready?</div><div class="a">no → tries left?</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Render tries left?</div><div class="a">yes → wait · no → stop</div></div>
   </div>
-  <div class="lane">5 · Switch, then mock publish</div>
+  <div class="lane">5 · Ask the human</div>
   <div class="row">
-    <div class="nd" style="--c:#00c571"><div class="t">Switch</div><div class="n">Which button?</div></div>
+    <div class="nd" style="--c:#2ca5e0"><div class="t">Telegram</div><div class="n">Send video + buttons</div><div class="a">Approve / Rewrite script / Redo clips</div></div>
+    <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait for tap</div><div class="a">resume URL · 24 h limit</div></div>
+    <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Regeneration budget</div><div class="a">MAX_REGENERATIONS per run</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">Switch</div><div class="n">Which button?</div><div class="a">approve · script · clips · cap · none</div></div>
+    <div class="nd" style="--c:#2ca5e0"><div class="t">Telegram</div><div class="n">Regeneration cap reached</div><div class="a">ends the run</div></div>
+  </div>
+  <div class="lane">6 · Publish, then log</div>
+  <div class="row">
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">IG container (REELS)</div></div>
-    <div class="nd" style="--c:#7e62cc"><div class="t">Poll</div><div class="n">status_code = FINISHED?</div></div>
+    <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait 10s — container</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Poll container status</div></div>
+    <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Count container poll</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">status_code = FINISHED?</div><div class="a">no → tries left?</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Container tries left?</div><div class="a">yes → wait · no → stop</div></div>
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">media_publish</div></div>
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">TikTok init</div><div class="a">dry_run</div></div>
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">YouTube Shorts</div><div class="a">dry_run</div></div>
+    <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Write dedupe log</div><div class="a">only write of used ids</div></div>
     <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Log the post</div></div>
   </div>
   <div class="err">

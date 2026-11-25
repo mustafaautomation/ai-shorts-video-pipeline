@@ -59,23 +59,30 @@ flowchart TD
   dedupe -->|new| whisper[Whisper or fixture transcript]
   dedupe -->|seen| stop[End run]
   whisper --> script[Original script and scenes]
-  script --> stills[Flux or gradient plates]
-  stills --> motion[Kling or Ken Burns]
-  motion --> poll{Poll completed or timeout}
-  poll -->|no| motion
-  poll -->|yes| voice[ElevenLabs or Edge TTS]
-  voice --> render[Creatomate or ffmpeg or browser]
-  render --> human[Approve or Regenerate]
-  human -->|regenerate script| script
-  human -->|regenerate one scene| stills
+  script --> cost{Under COST_CAP_USD}
+  cost -->|no| capstop[Stop before any paid call]
+  cost -->|yes| stills[Flux or gradient plates]
+  cost -->|yes| voice[ElevenLabs or Edge TTS]
+  stills --> stillpoll{Still completed, capped polls}
+  stillpoll -->|yes| motion[Kling or Ken Burns]
+  motion --> clippoll{Clip completed, capped polls}
+  clippoll -->|next scene| stills
+  clippoll -->|all scenes| collect[Aggregate clips]
+  collect --> merge[Clips plus voice]
+  voice --> merge
+  merge --> render[Creatomate or ffmpeg or browser]
+  render --> renderpoll{Render ready, capped polls}
+  renderpoll -->|yes| human[Approve, Rewrite script, or Redo clips]
+  human -->|rewrite script, capped| script
+  human -->|redo clips, capped| cost
   human -->|approve| ig[IG REELS container]
-  ig --> wait[Poll status_code FINISHED]
-  wait --> publish[media_publish plus TikTok and Shorts mock]
-  publish --> log[Log the post]
+  ig --> wait{status_code FINISHED, capped polls}
+  wait -->|yes| publish[media_publish plus TikTok and Shorts mock]
+  publish --> log[Write dedupe log, then log the post]
   fail[Error trigger] --> alert[Alert with the failed step]
 ```
 
-Sync calls return immediately. Fal, Creatomate, and the Instagram container are submit-then-poll, with a timeout and exponential backoff. The full page is [docs/architecture.html](docs/architecture.html). The n8n import is [blueprints/n8n-shorts-pipeline.json](blueprints/n8n-shorts-pipeline.json) and the error workflow is [blueprints/n8n-error-workflow.json](blueprints/n8n-error-workflow.json).
+Sync calls return immediately. The Flux still, the Kling or Veo clip, the Creatomate render, and the Instagram container are each submit, wait, poll, and check. Every one of those loops counts its polls and stops with a named error when the count runs out, which fires the error workflow. Every HTTP step retries three times. The full page is [docs/architecture.html](docs/architecture.html). The n8n import is [blueprints/n8n-shorts-pipeline.json](blueprints/n8n-shorts-pipeline.json) and the error workflow is [blueprints/n8n-error-workflow.json](blueprints/n8n-error-workflow.json).
 
 ## CLI details
 
@@ -127,7 +134,7 @@ Copy `.env.example`. Every key is optional.
 | `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_USER_ID` | Reserved for a future Graph API client. Redacted in receipts |
 | `TIKTOK_ACCESS_TOKEN` | Reserved for the Content Posting API |
 | `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` | Reserved for `videos.insert` |
-| `SHORTS_API_BASE` | Base URL the blueprints call |
+| `SHORTS_API_BASE` | Base URL of the local API, for the Make scenario and other callers |
 
 No secret belongs in git. `.env` is ignored.
 
@@ -153,12 +160,39 @@ Mocked:
 
 ## Blueprints
 
-Both blueprints call `POST {SHORTS_API_BASE}/v1/pipeline` with `publish: true` and `dry_run: true`.
-
-- [blueprints/n8n-shorts-pipeline.json](blueprints/n8n-shorts-pipeline.json) — import in n8n, set `SHORTS_API_BASE`, then POST `{ "topic": "..." }` to the webhook.
+- [blueprints/n8n-shorts-pipeline.json](blueprints/n8n-shorts-pipeline.json) — the daily canvas. Import it in n8n, attach the credentials each HTTP node names, and set the error workflow id. It starts from the 09:00 schedule, not a webhook, and calls the providers directly.
+- [blueprints/n8n-error-workflow.json](blueprints/n8n-error-workflow.json) — the separate alert workflow.
 - [blueprints/make-shorts-scenario.json](blueprints/make-shorts-scenario.json) — import as a Make scenario blueprint. Create a scenario variable `shorts_api_base`.
 
-Start the API first: `shorts-pipeline serve`.
+### The n8n canvas
+
+63 nodes in six lanes, plus seven sticky notes.
+
+1. **Ingest and dedupe.** Schedule, `Run config`, Apify, rank, `Dedupe check`. The check only reads.
+2. **Understand, write, cost cap.** Download, Whisper, script, then `Cost cap check`. It prices the pass (stills, clips, voice, render) times the number of passes so far, and `Under cost cap?` stops the run with an error before any paid call when that is over `COST_CAP_USD`. Transcribe and script run before the check; they are priced at zero.
+3. **One scene at a time.** `Scene loop` takes one scene. Flux is submitted, polled until `COMPLETED`, and its image URL fetched. Only then does the image-to-video call run, with its own capped poll loop.
+4. **Collect, voice, render.** `Aggregate clips` turns the per-scene clips into one item before `Clips + voice`. Creatomate is submitted, then polled in a capped loop.
+5. **Ask the human.** The Telegram message has three buttons: Approve, Rewrite script, Redo clips. Each opens the execution's resume URL, so the same run continues. Rewrite script goes back to the script step. Redo clips keeps the words and the voiceover and goes back to the cost cap check. A run may regenerate `MAX_REGENERATIONS` times; after that it ends and says so. No tap in 24 hours also ends it.
+6. **Publish, then log.** Instagram container, a capped poll for `status_code = FINISHED`, `media_publish`, TikTok and YouTube with `dry_run: true`. `Write dedupe log` runs last and is the only write to the used-reel list, so a failed or abandoned run leaves the reel for a later day.
+
+`Run config` is the one place the canvas reads its limits from:
+
+| n8n variable | Default | Role |
+| --- | --- | --- |
+| `COST_CAP_USD` | `1` | Projected spend above this stops the run |
+| `COST_PER_STILL_USD`, `COST_PER_CLIP_USD`, `COST_VOICE_USD`, `COST_RENDER_USD` | `0.03`, `0.10`, `0.03`, `0.08` | Estimates used by the cost cap check. Same figures as `PRICE_USD` in the Python pipeline |
+| `MAX_REGENERATIONS` | `2` | Regenerations allowed in one run |
+| `MAX_STILL_POLLS`, `MAX_CLIP_POLLS`, `MAX_RENDER_POLLS`, `MAX_CONTAINER_POLLS` | `30`, `40`, `40`, `30` | Polls before each loop gives up |
+| `GRAPH_API_VERSION` | `v21.0` | Used by all three Graph API URLs |
+| `SOURCE_INSTAGRAM_USERNAMES` | empty | Comma-separated accounts for the Apify scrape |
+
+The canvas also reads `ELEVENLABS_VOICE_ID`, `CREATOMATE_TEMPLATE_ID`, `TELEGRAM_CHAT_ID`, and `INSTAGRAM_USER_ID`.
+
+Workflow static data, where the dedupe log lives, is saved only for active executions, not manual test runs.
+
+### The local API
+
+The Make scenario and any other caller can use the local API instead: `POST {SHORTS_API_BASE}/v1/pipeline` with `publish: true` and `dry_run: true`. Start it first: `shorts-pipeline serve`.
 
 The same job from a shell is `shorts-pipeline run --topic "..." --publish`.
 

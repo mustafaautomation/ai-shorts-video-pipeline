@@ -68,22 +68,22 @@
           <div class="card"><div class="kicker k-green"><span class="num">9</span>Render</div><div class="name">Creatomate</div><div class="sub">Else ffmpeg (CLI) or the browser encoder.</div></div>
         </div>
         <div class="row" style="margin-top:10px">
-          <div class="card"><div class="kicker k-sky"><span class="num">10</span>Messaging</div><div class="name">Telegram</div><div class="sub">Approve / Regenerate when the bot token and chat id are set. Else the on-page card.</div></div>
+          <div class="card"><div class="kicker k-sky"><span class="num">10</span>Messaging</div><div class="name">Telegram</div><div class="sub">Approve / Rewrite script / Redo clips when the bot token and chat id are set. Else the on-page card.</div></div>
           <div class="card"><div class="kicker k-pink">Social</div><div class="name">Instagram, TikTok, Shorts</div><div class="sub">REELS container, poll FINISHED, media_publish. Always dry-run in this demo.</div></div>
         </div>
       </div>
       <div class="row">
         <div class="zone" style="flex:1">
           <div class="tab store">Storage</div>
-          <div class="card"><div class="kicker"><span class="num">3</span>Dedupe and run log</div><div class="name">Used reel ids</div><div class="sub">Claim once. A later run skips that id and will not post twice.</div></div>
+          <div class="card"><div class="kicker"><span class="num">3</span>Dedupe and run log</div><div class="name">Used reel ids</div><div class="sub">Written after a successful publish. A later run skips that id and will not post twice.</div></div>
         </div>
         <div class="zone" style="flex:1">
           <div class="tab human">The human</div>
           <div class="phone">
             <div class="kicker k-amber">Phone</div>
-            <div class="name">Approve or Regenerate</div>
-            <div class="sub">Regenerate rewrites the script, or one scene. Not the whole day.</div>
-            <div style="margin-top:8px"><span class="btn ok">Approve</span><span class="btn regen">Regenerate</span></div>
+            <div class="name">Approve, Rewrite script, or Redo clips</div>
+            <div class="sub">Rewrite script redoes the words. Redo clips keeps them. Capped per run. Not the whole day.</div>
+            <div style="margin-top:8px"><span class="btn ok">Approve</span><span class="btn regen">Rewrite script</span><span class="btn regen">Redo clips</span></div>
           </div>
         </div>
       </div>
@@ -109,10 +109,10 @@
       <p>A slow render or a failed call cannot skip the day, and cannot post twice.</p>
       <ul>
         <li><b>Retries with backoff.</b> HTTP steps retry timeouts and 5xx. The wait doubles.</li>
-        <li><b>Timeouts.</b> Each poll loop has a hard cap.</li>
-        <li><b>Cost cap per run.</b> Paid image, video, and voice calls stop at COST_CAP_USD. Free calls cost zero.</li>
+        <li><b>Timeouts.</b> Each poll loop (still, clip, render, Instagram container) counts its polls and stops at a hard cap.</li>
+        <li><b>Cost cap per run.</b> Paid image, video, voice, and render calls are checked against COST_CAP_USD before each pass, regenerations included. Free calls cost zero.</li>
         <li><b>Alerting.</b> A separate Error Trigger workflow names the failed step.</li>
-        <li><b>Idempotency.</b> Used reel ids and posted ids are stored before a retry can repeat them.</li>
+        <li><b>Idempotency.</b> The reel id is written to the dedupe log after a successful publish. Later runs skip logged ids, and a failed run leaves the reel for another day.</li>
       </ul>
     </aside>
   </div>
