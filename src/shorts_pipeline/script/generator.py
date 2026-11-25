@@ -134,11 +134,11 @@ def _build(topic: str, hook: str, body: list[str], cta: str) -> Script | None:
     return None
 
 
-def offline_script(topic: str) -> Script:
-    """Deterministic script. The same topic always yields the same words."""
+def offline_script(topic: str, *, variant: int = 0) -> Script:
+    """Deterministic script. The same topic and variant always yield the same words."""
     phrase = spoken_topic(topic)
     forms = _phrase_forms(phrase)
-    seed = topic_seed(topic)
+    seed = topic_seed(topic) + max(0, variant)
     hook = _hook_for(seed, forms)
     cta = CTAS[seed % len(CTAS)].format(**forms)
     rotated = [BEATS[(seed + offset) % len(BEATS)].format(**forms) for offset in range(len(BEATS))]
