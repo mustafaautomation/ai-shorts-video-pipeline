@@ -38,6 +38,18 @@
               "type": "number"
             },
             {
+              "id": "cfg-dry",
+              "name": "publishDryRun",
+              "value": "={{ !['0', 'false', 'no'].includes(String($env.PUBLISH_DRY_RUN ?? 'true').trim().toLowerCase()) }}",
+              "type": "boolean"
+            },
+            {
+              "id": "cfg-attempts",
+              "name": "maxReelAttempts",
+              "value": "={{ Number($env.MAX_REEL_ATTEMPTS || 3) }}",
+              "type": "number"
+            },
+            {
               "id": "cfg-regen",
               "name": "maxRegenerations",
               "value": "={{ Number($env.MAX_REGENERATIONS || 2) }}",
@@ -156,7 +168,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Read-only. The id is written by 'Write dedupe log' after a successful publish.\nconst data = $getWorkflowStaticData('global');\nconst seen = new Set([...(data.used || []), ...(data.posts || []).map(p => String(p.reelId))]);\nconst fresh = items.find(i => !seen.has(String(i.json.id||i.json.shortCode)));\nif (!fresh) return [{json:{newReel:false}}];\nconst id = String(fresh.json.id||fresh.json.shortCode);\nreturn [{json:{...fresh.json, newReel:true, reelId:id}}];"
+        "jsCode": "// Read-only. Skips reels that were posted, abandoned, or started too many times.\nconst cfg = $('Run config').first().json;\nconst data = $getWorkflowStaticData('global');\nconst attempts = data.attempts || {};\nconst seen = new Set([...(data.used || []), ...(data.posts || []).map(p => String(p.reelId)), ...(data.abandoned || []).map(a => String(a.reelId))]);\nconst idOf = i => String(i.json.id||i.json.shortCode);\nconst fresh = items.find(i => !seen.has(idOf(i)) && (attempts[idOf(i)] || 0) < cfg.maxReelAttempts);\nif (!fresh) return [{json:{newReel:false}}];\nconst id = String(fresh.json.id||fresh.json.shortCode);\nreturn [{json:{...fresh.json, newReel:true, reelId:id}}];"
       },
       "id": "n05",
       "name": "Dedupe check",
@@ -214,6 +226,19 @@
     },
     {
       "parameters": {
+        "jsCode": "// A reel that keeps failing, timing out, or going unanswered is started at most\n// MAX_REEL_ATTEMPTS times. After that Dedupe check stops picking it.\nconst data = $getWorkflowStaticData('global');\ndata.attempts = data.attempts || {};\nconst reelId = String($json.reelId);\ndata.attempts[reelId] = (data.attempts[reelId] || 0) + 1;\nreturn [{ json: { ...$json, reelAttempt: data.attempts[reelId] } }];"
+      },
+      "id": "n08",
+      "name": "Count reel attempt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        280
+      ]
+    },
+    {
+      "parameters": {
         "method": "GET",
         "url": "={{$json.videoUrl || $json.video_url}}",
         "options": {
@@ -225,7 +250,7 @@
           }
         }
       },
-      "id": "n08",
+      "id": "n09",
       "name": "Download source MP4",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -262,7 +287,7 @@
           "timeout": 60000
         }
       },
-      "id": "n09",
+      "id": "n10",
       "name": "Transcribe (Whisper)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -293,7 +318,7 @@
           "timeout": 60000
         }
       },
-      "id": "n10",
+      "id": "n11",
       "name": "Script + scene prompts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -315,7 +340,7 @@
       "parameters": {
         "jsCode": "const raw = $json.choices?.[0]?.message?.content ?? '{}';\nlet script;\ntry { script = typeof raw === 'string' ? JSON.parse(raw) : raw; }\ncatch (error) { throw new Error('Script step did not return JSON'); }\nif (!Array.isArray(script.scenes) || script.scenes.length === 0) throw new Error('Script has no scenes');\nreturn [{ json: { reelId: $('Dedupe check').first().json.reelId, hook: script.hook, script: script.script, voiceover: script.voiceover, caption: script.caption || script.hook, scenes: script.scenes } }];"
       },
-      "id": "n11",
+      "id": "n12",
       "name": "Parse script",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -328,7 +353,7 @@
       "parameters": {
         "jsCode": "// Runs before every paid pass: the first one, and each regeneration.\n// Estimate is conservative: every pass is priced as stills + clips + voice + render.\nconst cfg = $('Run config').first().json;\nconst script = $('Parse script').last().json;\nconst regenTarget = $('Regeneration budget').isExecuted ? $('Regeneration budget').last().json.choice : 'first_pass';\nconst pass = $runIndex + 1;\nconst perPassUsd = script.scenes.length * (cfg.costPerStillUsd + cfg.costPerClipUsd) + cfg.costVoiceUsd + cfg.costRenderUsd;\nconst projectedUsd = Math.round(pass * perPassUsd * 100) / 100;\nreturn [{ json: { ...script, pass, regenTarget, projectedUsd, costCapUsd: cfg.costCapUsd, underCap: projectedUsd <= cfg.costCapUsd + 1e-9 } }];"
       },
-      "id": "n12",
+      "id": "n13",
       "name": "Cost cap check",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -362,7 +387,7 @@
         },
         "options": {}
       },
-      "id": "n13",
+      "id": "n14",
       "name": "Under cost cap?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -375,7 +400,7 @@
       "parameters": {
         "errorMessage": "=Cost cap reached: pass {{ $json.pass }} would bring the run to ${{ $json.projectedUsd }}, over the ${{ $json.costCapUsd }} cap (COST_CAP_USD). No paid call was made for this pass."
       },
-      "id": "n14",
+      "id": "n15",
       "name": "Cost cap reached",
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
@@ -389,7 +414,7 @@
         "fieldToSplitOut": "scenes",
         "options": {}
       },
-      "id": "n15",
+      "id": "n16",
       "name": "Scenes",
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
@@ -405,7 +430,7 @@
           "reset": "={{ $node[\"Scene loop\"].context[\"done\"] === true }}"
         }
       },
-      "id": "n16",
+      "id": "n17",
       "name": "Scene loop",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
@@ -427,7 +452,7 @@
           "timeout": 60000
         }
       },
-      "id": "n17",
+      "id": "n18",
       "name": "fal.ai Flux",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -450,7 +475,7 @@
         "amount": 10,
         "unit": "seconds"
       },
-      "id": "n18",
+      "id": "n19",
       "name": "Wait 10s — still",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -469,7 +494,7 @@
           "timeout": 30000
         }
       },
-      "id": "n19",
+      "id": "n20",
       "name": "Poll still status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -492,7 +517,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "// Carry the submit response forward and count this poll.\nconst prev = $('Wait 10s — still').item.json;\nreturn { json: { ...prev, status: $json.status, attempt: (prev.attempt || 0) + 1 } };"
       },
-      "id": "n20",
+      "id": "n21",
       "name": "Count still poll",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -525,7 +550,7 @@
         },
         "options": {}
       },
-      "id": "n21",
+      "id": "n22",
       "name": "Still COMPLETED?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -558,7 +583,7 @@
         },
         "options": {}
       },
-      "id": "n22",
+      "id": "n23",
       "name": "Still tries left?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -571,7 +596,7 @@
       "parameters": {
         "errorMessage": "=Flux still not COMPLETED after {{ $json.attempt }} polls (last status: {{ $json.status }})."
       },
-      "id": "n23",
+      "id": "n24",
       "name": "Still timed out",
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
@@ -590,7 +615,7 @@
           "timeout": 30000
         }
       },
-      "id": "n24",
+      "id": "n25",
       "name": "Get still URL",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -621,7 +646,7 @@
           "timeout": 60000
         }
       },
-      "id": "n25",
+      "id": "n26",
       "name": "fal.ai Kling / Veo",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -644,7 +669,7 @@
         "amount": 30,
         "unit": "seconds"
       },
-      "id": "n26",
+      "id": "n27",
       "name": "Wait 30s",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -663,7 +688,7 @@
           "timeout": 30000
         }
       },
-      "id": "n27",
+      "id": "n28",
       "name": "Poll fal status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -686,7 +711,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "// Carry the submit response forward and count this poll.\nconst prev = $('Wait 30s').item.json;\nreturn { json: { ...prev, status: $json.status, attempt: (prev.attempt || 0) + 1 } };"
       },
-      "id": "n28",
+      "id": "n29",
       "name": "Count clip poll",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -719,7 +744,7 @@
         },
         "options": {}
       },
-      "id": "n29",
+      "id": "n30",
       "name": "COMPLETED?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -752,7 +777,7 @@
         },
         "options": {}
       },
-      "id": "n30",
+      "id": "n31",
       "name": "Clip tries left?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -765,7 +790,7 @@
       "parameters": {
         "errorMessage": "=Image-to-video clip not COMPLETED after {{ $json.attempt }} polls (last status: {{ $json.status }})."
       },
-      "id": "n31",
+      "id": "n32",
       "name": "Clip timed out",
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
@@ -784,7 +809,7 @@
           "timeout": 30000
         }
       },
-      "id": "n32",
+      "id": "n33",
       "name": "Get clip URL",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -807,7 +832,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const scene = $('Scene loop').item.json;\nif (!$json.video?.url) throw new Error('fal result has no video url');\nreturn { json: { prompt: scene.prompt, narration: scene.narration, clip_url: $json.video.url } };"
       },
-      "id": "n33",
+      "id": "n34",
       "name": "Scene clip",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -822,7 +847,7 @@
         "destinationFieldName": "clips",
         "options": {}
       },
-      "id": "n34",
+      "id": "n35",
       "name": "Aggregate clips",
       "type": "n8n-nodes-base.aggregate",
       "typeVersion": 1,
@@ -855,7 +880,7 @@
         },
         "options": {}
       },
-      "id": "n35",
+      "id": "n36",
       "name": "Voice needed?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -877,7 +902,7 @@
           "timeout": 60000
         }
       },
-      "id": "n36",
+      "id": "n37",
       "name": "ElevenLabs TTS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -901,7 +926,7 @@
         "combineBy": "combineAll",
         "options": {}
       },
-      "id": "n37",
+      "id": "n38",
       "name": "Clips + voice",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
@@ -923,7 +948,7 @@
           "timeout": 60000
         }
       },
-      "id": "n38",
+      "id": "n39",
       "name": "Creatomate render",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -946,7 +971,7 @@
         "amount": 15,
         "unit": "seconds"
       },
-      "id": "n39",
+      "id": "n40",
       "name": "Wait 15s — render",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -965,7 +990,7 @@
           "timeout": 30000
         }
       },
-      "id": "n40",
+      "id": "n41",
       "name": "Poll render",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -988,7 +1013,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "// Carry the submit response forward and count this poll.\nconst prev = $('Wait 15s — render').item.json;\nreturn { json: { ...prev, status: $json.status, url: $json.url, attempt: (prev.attempt || 0) + 1 } };"
       },
-      "id": "n41",
+      "id": "n42",
       "name": "Count render poll",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1021,7 +1046,7 @@
         },
         "options": {}
       },
-      "id": "n42",
+      "id": "n43",
       "name": "Render ready?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -1063,7 +1088,7 @@
         },
         "options": {}
       },
-      "id": "n43",
+      "id": "n44",
       "name": "Render tries left?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -1076,7 +1101,7 @@
       "parameters": {
         "errorMessage": "=Creatomate render not ready after {{ $json.attempt }} polls (last status: {{ $json.status }})."
       },
-      "id": "n44",
+      "id": "n45",
       "name": "Render timed out",
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
@@ -1116,6 +1141,18 @@
                   }
                 ]
               }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Reject",
+                    "additionalFields": {
+                      "url": "={{ $execution.resumeUrl }}?choice=reject"
+                    }
+                  }
+                ]
+              }
             }
           ]
         },
@@ -1123,7 +1160,7 @@
           "appendAttribution": false
         }
       },
-      "id": "n45",
+      "id": "n46",
       "name": "Send video + buttons",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -1149,7 +1186,7 @@
         "resumeUnit": "hours",
         "options": {}
       },
-      "id": "n46",
+      "id": "n47",
       "name": "Wait for tap",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -1162,7 +1199,7 @@
       "parameters": {
         "jsCode": "// One run of this node per approval round, so $runIndex is the number of\n// regenerations this execution has already done.\nconst cfg = $('Run config').first().json;\nconst tapped = $json.query?.choice || 'none';\nconst regenerationsUsed = $runIndex;\nconst wantsRegeneration = tapped === 'rewrite_script' || tapped === 'redo_clips';\nconst choice = wantsRegeneration && regenerationsUsed >= cfg.maxRegenerations ? 'cap_reached' : tapped;\nreturn [{ json: { choice, tapped, regenerationsUsed, maxRegenerations: cfg.maxRegenerations } }];"
       },
-      "id": "n47",
+      "id": "n48",
       "name": "Regeneration budget",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1270,6 +1307,30 @@
               },
               "renameOutput": true,
               "outputKey": "Regeneration cap"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "choice-reject",
+                    "leftValue": "={{ $json.choice }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "reject"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Reject"
             }
           ]
         },
@@ -1277,7 +1338,7 @@
           "fallbackOutput": "extra"
         }
       },
-      "id": "n48",
+      "id": "n49",
       "name": "Which button?",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -1288,19 +1349,32 @@
     },
     {
       "parameters": {
+        "jsCode": "// Rejected, or out of regenerations: record the reel so no later run picks it.\nconst data = $getWorkflowStaticData('global');\ndata.abandoned = data.abandoned || [];\nconst reelId = String($('Dedupe check').first().json.reelId);\nconst reason = $json.choice === 'reject' ? 'rejected' : 'regeneration_cap';\nif (!data.abandoned.some(entry => String(entry.reelId) === reelId)) {\n  data.abandoned.push({ reelId, reason, at: new Date().toISOString() });\n}\nreturn [{ json: { reelId, abandoned: true, reason, maxRegenerations: $json.maxRegenerations } }];"
+      },
+      "id": "n50",
+      "name": "Log abandoned reel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        2940
+      ]
+    },
+    {
+      "parameters": {
         "operation": "sendMessage",
         "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
-        "text": "=Regeneration cap reached ({{ $json.maxRegenerations }} per run). Nothing was posted. The reel stays unused and can be picked up by a later run.",
+        "text": "={{ $json.reason === 'rejected' ? 'Rejected.' : 'Regeneration cap reached (' + $json.maxRegenerations + ' per run).' }} Nothing was posted. This reel is logged as abandoned and will not be picked again.",
         "additionalFields": {
           "appendAttribution": false
         }
       },
-      "id": "n49",
-      "name": "Regeneration cap reached",
+      "id": "n51",
+      "name": "Reel abandoned",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1200,
+        1440,
         2940
       ],
       "credentials": {
@@ -1312,13 +1386,60 @@
     },
     {
       "parameters": {},
-      "id": "n50",
+      "id": "n52",
       "name": "No answer — end",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        1440,
+        1680,
         2940
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dry-run",
+              "leftValue": "={{ $('Run config').first().json.publishDryRun }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n53",
+      "name": "Dry run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        3240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Demo mode. Builds the requests a live run would send and sends none of them.\nconst cfg = $('Run config').first().json;\nconst caption = $('Parse script').last().json.caption;\nconst videoUrl = $('Count render poll').last().json.url;\nconst graph = 'https://graph.facebook.com/' + cfg.graphApiVersion;\nconst requests = [\n  { platform: 'instagram_reels', steps: [\n    { method: 'POST', url: graph + '/{ig-user-id}/media', json: { media_type: 'REELS', video_url: videoUrl, caption, share_to_feed: true } },\n    { method: 'GET', url: graph + '/{container-id}', query: { fields: 'status_code' } },\n    { method: 'POST', url: graph + '/{ig-user-id}/media_publish', json: { creation_id: '<id from step 1>' } } ] },\n  { platform: 'tiktok', method: 'POST', url: 'https://open.tiktokapis.com/v2/post/publish/video/init/' },\n  { platform: 'youtube_shorts', method: 'POST', url: 'https://www.googleapis.com/upload/youtube/v3/videos' },\n];\nreturn [{ json: { dry_run: true, sent: false, permalink: 'mock://post', requests } }];"
+      },
+      "id": "n54",
+      "name": "Mock publish (dry run)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        3420
       ]
     },
     {
@@ -1334,12 +1455,12 @@
           "timeout": 60000
         }
       },
-      "id": "n51",
+      "id": "n55",
       "name": "IG container (REELS)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        240,
+        480,
         3240
       ],
       "credentials": {
@@ -1357,12 +1478,12 @@
         "amount": 10,
         "unit": "seconds"
       },
-      "id": "n52",
+      "id": "n56",
       "name": "Wait 10s — container",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        480,
+        720,
         3240
       ]
     },
@@ -1385,12 +1506,12 @@
           "timeout": 30000
         }
       },
-      "id": "n53",
+      "id": "n57",
       "name": "Poll container status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        720,
+        960,
         3240
       ],
       "credentials": {
@@ -1408,12 +1529,12 @@
         "mode": "runOnceForEachItem",
         "jsCode": "// Carry the submit response forward and count this poll.\nconst prev = $('Wait 10s — container').item.json;\nreturn { json: { ...prev, status_code: $json.status_code, attempt: (prev.attempt || 0) + 1 } };"
       },
-      "id": "n54",
+      "id": "n58",
       "name": "Count container poll",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        960,
+        1200,
         3240
       ]
     },
@@ -1441,12 +1562,12 @@
         },
         "options": {}
       },
-      "id": "n55",
+      "id": "n59",
       "name": "status_code = FINISHED?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1200,
+        1440,
         3240
       ]
     },
@@ -1483,12 +1604,12 @@
         },
         "options": {}
       },
-      "id": "n56",
+      "id": "n60",
       "name": "Container tries left?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1200,
+        1440,
         3420
       ]
     },
@@ -1496,12 +1617,12 @@
       "parameters": {
         "errorMessage": "=Instagram container not FINISHED after {{ $json.attempt }} polls (last status_code: {{ $json.status_code }}). Nothing was published."
       },
-      "id": "n57",
+      "id": "n61",
       "name": "Container timed out",
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
       "position": [
-        1440,
+        1680,
         3420
       ]
     },
@@ -1518,12 +1639,12 @@
           "timeout": 60000
         }
       },
-      "id": "n58",
+      "id": "n62",
       "name": "media_publish",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1440,
+        1680,
         3240
       ],
       "credentials": {
@@ -1549,12 +1670,12 @@
           "timeout": 30000
         }
       },
-      "id": "n59",
+      "id": "n63",
       "name": "TikTok init",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1680,
+        1920,
         3240
       ],
       "credentials": {
@@ -1580,12 +1701,12 @@
           "timeout": 30000
         }
       },
-      "id": "n60",
+      "id": "n64",
       "name": "YouTube Shorts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1920,
+        2160,
         3240
       ],
       "credentials": {
@@ -1600,23 +1721,10 @@
     },
     {
       "parameters": {
-        "jsCode": "// The only write to the used-reel list. It runs after the publish steps, so a\n// failed or abandoned run leaves the reel free for a later run.\nconst data = $getWorkflowStaticData('global');\ndata.used = data.used || [];\nconst reelId = String($('Dedupe check').first().json.reelId);\nif (!data.used.includes(reelId)) data.used.push(reelId);\nreturn [{ json: { reelId, dedupeLogged: true, usedCount: data.used.length } }];"
+        "jsCode": "// The only write to the used-reel list. It runs after the publish steps, so a\n// failed or abandoned run leaves the reel free for a later run.\nconst data = $getWorkflowStaticData('global');\ndata.used = data.used || [];\nconst reelId = String($('Dedupe check').first().json.reelId);\nif (!data.used.includes(reelId)) data.used.push(reelId);\nreturn [{ json: { reelId, permalink: $json.permalink, dedupeLogged: true, usedCount: data.used.length } }];"
       },
-      "id": "n61",
+      "id": "n65",
       "name": "Write dedupe log",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1680,
-        3420
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $getWorkflowStaticData('global');\ndata.posts = data.posts || [];\nif (!data.posts.some(post => String(post.reelId) === String($json.reelId))) {\n  data.posts.push({ reelId: $json.reelId, permalink: $json.permalink || 'mock://post', at: new Date().toISOString() });\n}\nreturn [{json:{logged:true, reelId: $json.reelId, posts:data.posts.length}}];"
-      },
-      "id": "n62",
-      "name": "Log the post",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -1626,19 +1734,32 @@
     },
     {
       "parameters": {
+        "jsCode": "const data = $getWorkflowStaticData('global');\ndata.posts = data.posts || [];\nif (!data.posts.some(post => String(post.reelId) === String($json.reelId))) {\n  data.posts.push({ reelId: $json.reelId, permalink: $json.permalink || 'mock://post', at: new Date().toISOString() });\n}\nreturn [{json:{logged:true, reelId: $json.reelId, posts:data.posts.length}}];"
+      },
+      "id": "n66",
+      "name": "Log the post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        3420
+      ]
+    },
+    {
+      "parameters": {
         "operation": "sendMessage",
         "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
-        "text": "Posted. TikTok and YouTube were sent with dry_run:true.",
+        "text": "={{ $('Run config').first().json.publishDryRun ? 'Dry run. Approved and logged, but nothing was sent to Instagram, TikTok, or YouTube. Set PUBLISH_DRY_RUN=false to go live.' : 'Posted to Instagram. TikTok and YouTube were sent with dry_run:true.' }}",
         "additionalFields": {
           "appendAttribution": false
         }
       },
-      "id": "n63",
+      "id": "n67",
       "name": "Posted",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        2160,
+        2400,
         3420
       ],
       "credentials": {
@@ -1650,7 +1771,7 @@
     },
     {
       "parameters": {
-        "content": "## Daily Reels pipeline\nRun config is the one place for limits: COST_CAP_USD, MAX_REGENERATIONS, the four poll caps, GRAPH_API_VERSION and SOURCE_INSTAGRAM_USERNAMES. Credentials are n8n credential refs, never raw keys. A capped loop that runs out ends in a Stop and Error node, which fires the error workflow.",
+        "content": "## Daily Reels pipeline\nRun config is the one place for settings: PUBLISH_DRY_RUN, COST_CAP_USD, MAX_REGENERATIONS, MAX_REEL_ATTEMPTS, the four poll caps, GRAPH_API_VERSION and SOURCE_INSTAGRAM_USERNAMES. Credentials are n8n credential refs, never raw keys. A capped loop that runs out ends in a Stop and Error node, which fires the error workflow.",
         "height": 160,
         "width": 640
       },
@@ -1665,7 +1786,7 @@
     },
     {
       "parameters": {
-        "content": "### 1 · Ingest and dedupe\nDedupe check only reads. The write happens in lane 6.",
+        "content": "### 1 · Ingest and dedupe\nDedupe check only reads. It skips posted and abandoned reels, and reels started MAX_REEL_ATTEMPTS times.",
         "height": 160,
         "width": 420
       },
@@ -1725,8 +1846,8 @@
     },
     {
       "parameters": {
-        "content": "### 5 · Ask the human\nThree buttons resume this execution: Approve, Rewrite script, Redo clips. Rewrite script returns to lane 2, Redo clips to the cost cap check. Neither reruns the scrape. No tap in 24 hours ends the run.",
-        "height": 130,
+        "content": "### 5 · Ask the human\nThe buttons resume this execution: Approve, Rewrite script, Redo clips, and Reject. Rewrite script returns to lane 2, Redo clips to the cost cap check. Neither reruns the scrape. Reject, or a regeneration past the cap, logs the reel as abandoned. No tap in 24 hours ends the run.",
+        "height": 150,
         "width": 640
       },
       "id": "note6",
@@ -1735,13 +1856,13 @@
       "typeVersion": 1,
       "position": [
         240,
-        2580
+        2560
       ]
     },
     {
       "parameters": {
-        "content": "### 6 · Publish, then log\nTikTok and YouTube send dry_run:true. Write dedupe log is the only write to the used-reel list and runs last. Workflow static data is saved only for active (non-manual) executions.",
-        "height": 130,
+        "content": "### 6 · Publish, then log\nDry run? is the guard: unless PUBLISH_DRY_RUN is set to false, the run takes Mock publish and no Instagram, TikTok or YouTube node is called. Write dedupe log is the only write to the used-reel list and runs last. Workflow static data is saved only for active (non-manual) executions.",
+        "height": 150,
         "width": 640
       },
       "id": "note7",
@@ -1750,7 +1871,7 @@
       "typeVersion": 1,
       "position": [
         240,
-        3060
+        3040
       ]
     }
   ],
@@ -1814,7 +1935,7 @@
       "main": [
         [
           {
-            "node": "Download source MP4",
+            "node": "Count reel attempt",
             "type": "main",
             "index": 0
           }
@@ -1822,6 +1943,17 @@
         [
           {
             "node": "Already used — end",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count reel attempt": {
+      "main": [
+        [
+          {
+            "node": "Download source MP4",
             "type": "main",
             "index": 0
           }
@@ -2296,7 +2428,7 @@
       "main": [
         [
           {
-            "node": "IG container (REELS)",
+            "node": "Dry run?",
             "type": "main",
             "index": 0
           }
@@ -2317,7 +2449,14 @@
         ],
         [
           {
-            "node": "Regeneration cap reached",
+            "node": "Log abandoned reel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log abandoned reel",
             "type": "main",
             "index": 0
           }
@@ -2325,6 +2464,17 @@
         [
           {
             "node": "No answer — end",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log abandoned reel": {
+      "main": [
+        [
+          {
+            "node": "Reel abandoned",
             "type": "main",
             "index": 0
           }
@@ -2394,6 +2544,35 @@
         [
           {
             "node": "Container timed out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry run?": {
+      "main": [
+        [
+          {
+            "node": "Mock publish (dry run)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IG container (REELS)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock publish (dry run)": {
+      "main": [
+        [
+          {
+            "node": "Write dedupe log",
             "type": "main",
             "index": 0
           }

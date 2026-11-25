@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -109,6 +110,9 @@ def test_n8n_workflow_matches_the_daily_canvas() -> None:
         "Render ready?",
         "Send video + buttons",
         "Which button?",
+        "Log abandoned reel",
+        "Dry run?",
+        "Mock publish (dry run)",
         "IG container (REELS)",
         "status_code = FINISHED?",
         "media_publish",
@@ -124,7 +128,7 @@ def test_n8n_workflow_matches_the_daily_canvas() -> None:
     assert "dry_run" in blob
     assert _outputs(document, TRIGGER) == [["Run config"]]
     assert _outputs(document, "Run config") == [["Apify — scrape Reels"]]
-    assert _outputs(document, "Which button?")[0] == ["IG container (REELS)"]
+    assert _outputs(document, "Which button?")[0] == ["Dry run?"]
     assert document["settings"]["errorWorkflow"]
 
 
@@ -262,10 +266,15 @@ def test_n8n_approval_has_three_choices_and_a_regeneration_cap() -> None:
     document = _pipeline()
     nodes = _by_name(document)
     rows = nodes["Send video + buttons"]["parameters"]["inlineKeyboard"]["rows"]
+    # First row: the three ways forward. Second row: the way out.
+    assert [[button["text"] for button in row["row"]["buttons"]] for row in rows] == [
+        ["Approve", "Rewrite script", "Redo clips"],
+        ["Reject"],
+    ]
     buttons = [button for row in rows for button in row["row"]["buttons"]]
-    assert [button["text"] for button in buttons] == ["Approve", "Rewrite script", "Redo clips"]
-    choices = [button["additionalFields"]["url"].split("?choice=")[1] for button in buttons]
-    assert choices == ["approve", "rewrite_script", "redo_clips"]
+    all_choices = [button["additionalFields"]["url"].split("?choice=")[1] for button in buttons]
+    assert all_choices == ["approve", "rewrite_script", "redo_clips", "reject"]
+    choices = all_choices[:3]
     assert all("$execution.resumeUrl" in button["additionalFields"]["url"] for button in buttons)
 
     # The run pauses for the tap, with a time limit, and the Switch reads the tap.
@@ -283,14 +292,16 @@ def test_n8n_approval_has_three_choices_and_a_regeneration_cap() -> None:
         "Rewrite script",
         "Redo clips",
         "Regeneration cap",
+        "Reject",
     ]
     assert [rule["conditions"]["conditions"][0]["rightValue"] for rule in rules[:3]] == choices
     assert switch["parameters"]["options"]["fallbackOutput"] == "extra"
     assert _outputs(document, "Which button?") == [
-        ["IG container (REELS)"],
+        ["Dry run?"],
         ["Script + scene prompts"],
         ["Cost cap check"],
-        ["Regeneration cap reached"],
+        ["Log abandoned reel"],
+        ["Log abandoned reel"],
         ["No answer — end"],
     ]
 
@@ -306,7 +317,8 @@ def test_n8n_approval_has_three_choices_and_a_regeneration_cap() -> None:
     assert "regenerationsUsed >= cfg.maxRegenerations" in budget
     assert "'cap_reached'" in budget
     assert "$env.MAX_REGENERATIONS" in _config(document)["maxRegenerations"]
-    assert _targets(document, "Regeneration cap reached") == set()
+    assert _outputs(document, "Log abandoned reel") == [["Reel abandoned"]]
+    assert _targets(document, "Reel abandoned") == set()
     assert _targets(document, "No answer — end") == set()
 
 
@@ -348,10 +360,102 @@ def test_n8n_dedupe_log_is_written_once_at_the_end() -> None:
     assert ".push(" not in nodes["Dedupe check"]["parameters"]["jsCode"]
     assert _outputs(document, "YouTube Shorts") == [["Write dedupe log"]]
     assert _outputs(document, "Write dedupe log") == [["Log the post"]]
-    # Only an approved, published run reaches the write.
+    # Only an approved run that published, for real or as a dry run, reaches the write.
+    assert _outputs(document, "Mock publish (dry run)") == [["Write dedupe log"]]
     assert "Write dedupe log" not in _reachable(
-        document, TRIGGER, without=frozenset({"media_publish"})
+        document, TRIGGER, without=frozenset({"media_publish", "Mock publish (dry run)"})
     )
+    assert "Write dedupe log" not in _reachable(document, TRIGGER, without=frozenset({"Dry run?"}))
+
+
+def test_n8n_social_nodes_sit_behind_the_dry_run_guard() -> None:
+    document = _pipeline()
+    nodes = _by_name(document)
+    # Same switch and same default as the Python adapters: dry run unless set to false.
+    setting = _config(document)["publishDryRun"]
+    assert "$env.PUBLISH_DRY_RUN ?? 'true'" in setting
+    assert "['0', 'false', 'no']" in setting
+
+    guard = nodes["Dry run?"]
+    assert guard["type"] == "n8n-nodes-base.if"
+    condition = guard["parameters"]["conditions"]["conditions"][0]
+    assert condition["leftValue"] == "={{ $('Run config').first().json.publishDryRun }}"
+    assert condition["operator"]["operation"] == "true"
+    assert _outputs(document, "Dry run?") == [["Mock publish (dry run)"], ["IG container (REELS)"]]
+
+    # The dry-run branch holds no HTTP node, so it cannot call anything.
+    mock = nodes["Mock publish (dry run)"]
+    assert mock["type"] == "n8n-nodes-base.code"
+    assert "sent: false" in mock["parameters"]["jsCode"]
+    dry_branch = _reachable(document, "Mock publish (dry run)")
+    assert not [name for name in dry_branch if nodes[name]["type"] == HTTP]
+
+    # Every social node is reachable only through the guard, and only on its "false" output.
+    social = [
+        "IG container (REELS)",
+        "Poll container status",
+        "media_publish",
+        "TikTok init",
+        "YouTube Shorts",
+    ]
+    open_paths = _reachable(document, TRIGGER, without=frozenset({"Dry run?"}))
+    live_branch = _reachable(document, "IG container (REELS)")
+    for name in social:
+        assert name not in open_paths
+        assert name in live_branch
+    graph_nodes = [
+        node["name"]
+        for node in document["nodes"]
+        if node["type"] == HTTP and "graph.facebook.com" in node["parameters"]["url"]
+    ]
+    assert set(graph_nodes) <= set(social)
+
+    # The note and the closing message say the same thing.
+    posted = nodes["Posted"]["parameters"]["text"]
+    assert "publishDryRun ?" in posted
+    assert "nothing was sent to Instagram, TikTok, or YouTube" in posted
+    assert "PUBLISH_DRY_RUN" in nodes["Lane 6"]["parameters"]["content"]
+
+
+def test_n8n_rejected_or_exhausted_reels_are_logged_as_abandoned() -> None:
+    document = _pipeline()
+    nodes = _by_name(document)
+    # Reject and the regeneration cap both end in the abandoned log, and nowhere else.
+    cap_output, reject_output = _outputs(document, "Which button?")[3:5]
+    assert cap_output == reject_output == ["Log abandoned reel"]
+    sources = {name for name in nodes if "Log abandoned reel" in _targets(document, name)}
+    assert sources == {"Which button?"}
+    downstream = _reachable(document, "Log abandoned reel")
+    assert downstream == {"Log abandoned reel", "Reel abandoned"}
+
+    log = nodes["Log abandoned reel"]["parameters"]["jsCode"]
+    assert "data.abandoned.push({ reelId, reason," in log
+    assert "'rejected'" in log and "'regeneration_cap'" in log
+    assert "$('Dedupe check').first().json.reelId" in log
+    assert "will not be picked again" in nodes["Reel abandoned"]["parameters"]["text"]
+
+    # The next day's Dedupe check reads that log, so the reel is skipped.
+    check = nodes["Dedupe check"]["parameters"]["jsCode"]
+    assert "(data.abandoned || []).map(a => String(a.reelId))" in check
+    assert "!seen.has(idOf(i))" in check
+
+    # A reel that keeps failing or going unanswered is started a capped number of times.
+    assert _outputs(document, "New Reel?")[0] == ["Count reel attempt"]
+    assert _outputs(document, "Count reel attempt") == [["Download source MP4"]]
+    counter = nodes["Count reel attempt"]["parameters"]["jsCode"]
+    assert "data.attempts[reelId] = (data.attempts[reelId] || 0) + 1" in counter
+    assert "(attempts[idOf(i)] || 0) < cfg.maxReelAttempts" in check
+    assert "$env.MAX_REEL_ATTEMPTS" in _config(document)["maxReelAttempts"]
+    # Nothing paid runs before the attempt is counted.
+    before_count = _reachable(document, TRIGGER, without=frozenset({"Count reel attempt"}))
+    assert not set(PAID_NODES) & before_count
+
+
+def test_env_example_lists_every_variable_the_canvas_reads() -> None:
+    listed = set(re.findall(r"^([A-Z][A-Z0-9_]*)=", (ROOT / ".env.example").read_text(), re.M))
+    read = set(re.findall(r"\$env\.([A-Z][A-Z0-9_]*)", N8N_PIPELINE.read_text()))
+    assert read
+    assert read <= listed, sorted(read - listed)
 
 
 def test_n8n_http_nodes_retry_and_time_out() -> None:
