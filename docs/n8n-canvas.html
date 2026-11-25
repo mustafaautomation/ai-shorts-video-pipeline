@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>n8n canvas — Daily Reels</title>
+<style>
+  body { margin: 0; background: #121317; color: #e5e7eb; font-family: "IBM Plex Sans", "Segoe UI", sans-serif; }
+  header { display: flex; justify-content: space-between; padding: 18px 24px 10px; border-bottom: 2px solid #2a2b32; }
+  .eyebrow { color: #ea4b71; letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px; }
+  h1 { margin: 2px 0 0; font-size: 28px; }
+  h1 em { font-style: normal; color: #ea4b71; }
+  .canvas { margin: 16px; background: #1a1b20; background-image: radial-gradient(circle, #3a3b44 1px, transparent 1px); background-size: 16px 16px; border: 1px solid #2c2d36; border-radius: 10px; padding: 18px; }
+  .lane { color: #6b7280; letter-spacing: 0.14em; text-transform: uppercase; font-size: 11px; margin: 8px 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+  .nd { background: #2b2c33; border: 1px solid #3f404a; border-radius: 8px; border-left: 4px solid var(--c); padding: 8px 10px; width: 190px; }
+  .t { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94a3b8; }
+  .n { font-weight: 650; font-size: 14px; }
+  .a { font-family: ui-monospace, monospace; font-size: 10px; color: #9aa3b5; }
+  .err { border: 1.5px dashed #7f1d1d; background: rgba(127,29,29,.15); border-radius: 10px; padding: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <div><div class="eyebrow">n8n workflow</div><h1>Daily Reels Pipeline <em>canvas</em></h1></div>
+  <div>Import blueprints/n8n-shorts-pipeline.json · credentials are refs</div>
+</header>
+<div class="canvas">
+  <div class="lane">1 · Ingest and dedupe</div>
+  <div class="row">
+    <div class="nd" style="--c:#ff9900"><div class="t">Schedule</div><div class="n">09:00 daily</div><div class="a">cron 0 9 * * *</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Apify — scrape Reels</div><div class="a">apify~instagram-reel-scraper</div></div>
+    <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Rank by engagement</div><div class="a">(likes+comments)/views</div></div>
+    <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Dedupe check</div><div class="a">used reel ids</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">New Reel?</div><div class="a">false → end</div></div>
+  </div>
+  <div class="lane">2 · Understand and write</div>
+  <div class="row">
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Download source MP4</div></div>
+    <div class="nd" style="--c:#10b981"><div class="t">HTTP</div><div class="n">Transcribe (Whisper)</div><div class="a">whisper-large-v3</div></div>
+    <div class="nd" style="--c:#a78bfa"><div class="t">LLM</div><div class="n">Script + scene prompts</div><div class="a">{hook, voiceover, scenes[]}</div></div>
+  </div>
+  <div class="lane">3 · Visuals, then poll</div>
+  <div class="row">
+    <div class="nd" style="--c:#00bb88"><div class="t">Split</div><div class="n">Scenes</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">fal.ai Flux</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">fal.ai Kling / Veo</div></div>
+    <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait 30s</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Poll fal status</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">COMPLETED?</div><div class="a">no → wait, with timeout</div></div>
+  </div>
+  <div class="lane">4 · Voice, render, ask</div>
+  <div class="row">
+    <div class="nd" style="--c:#ef4444"><div class="t">HTTP</div><div class="n">ElevenLabs TTS</div><div class="a">else Edge TTS</div></div>
+    <div class="nd" style="--c:#00bb88"><div class="t">Merge</div><div class="n">Clips + voice</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Creatomate render</div><div class="a">else browser / ffmpeg</div></div>
+    <div class="nd" style="--c:#2ca5e0"><div class="t">Telegram</div><div class="n">Send video + buttons</div><div class="a">Approve / Regenerate</div></div>
+  </div>
+  <div class="lane">5 · Switch, then mock publish</div>
+  <div class="row">
+    <div class="nd" style="--c:#00c571"><div class="t">Switch</div><div class="n">Which button?</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">IG container (REELS)</div></div>
+    <div class="nd" style="--c:#7e62cc"><div class="t">Poll</div><div class="n">status_code = FINISHED?</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">media_publish</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">TikTok init</div><div class="a">dry_run</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">YouTube Shorts</div><div class="a">dry_run</div></div>
+    <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Log the post</div></div>
+  </div>
+  <div class="err">
+    <div class="lane" style="color:#fca5a5">Error workflow · separate canvas</div>
+    <div class="row">
+      <div class="nd" style="--c:#ef4444"><div class="t">Error trigger</div><div class="n">On any failed node</div></div>
+      <div class="nd" style="--c:#2ca5e0"><div class="t">Telegram</div><div class="n">Alert — step failed</div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

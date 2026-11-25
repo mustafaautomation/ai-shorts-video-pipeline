@@ -183,10 +183,10 @@ function publish(topic: string, hook: string, body: string[], cta: string, provi
   };
 }
 
-export function offlineScript(topic: string): ScriptDraft {
+export function offlineScript(topic: string, variant = 0): ScriptDraft {
   const phrase = spokenTopic(topic);
   const forms = formsFor(phrase);
-  const seed = topicSeed(topic);
+  const seed = topicSeed(topic) + Math.max(0, variant);
   const hook = hookFor(seed, forms);
   const cta = fill(CTAS[seed % CTAS.length], forms);
   const rotated = BEATS.map((_, offset) => fill(BEATS[(seed + offset) % BEATS.length], forms));
@@ -313,7 +313,7 @@ async function fromGemini(topic: string): Promise<ScriptDraft | null> {
   }
 }
 
-export async function generateScript(topic: string): Promise<ScriptDraft> {
+export async function generateScript(topic: string, variant = 0): Promise<ScriptDraft> {
   const cleaned = topic.replace(/\s+/g, " ").trim();
   if (!cleaned) throw new Error("topic is required");
   if (cleaned.length > 240) throw new Error("topic must be 240 characters or fewer");
@@ -321,5 +321,5 @@ export async function generateScript(topic: string): Promise<ScriptDraft> {
   if (groq) return groq;
   const gemini = await fromGemini(cleaned);
   if (gemini) return gemini;
-  return offlineScript(cleaned);
+  return offlineScript(cleaned, variant);
 }

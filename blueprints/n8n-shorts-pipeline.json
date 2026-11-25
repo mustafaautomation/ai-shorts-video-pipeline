@@ -1,65 +1,1056 @@
 {
-  "name": "AI Shorts — topic to mock publish",
+  "name": "Daily Instagram Reels Pipeline",
   "nodes": [
     {
       "parameters": {
-        "httpMethod": "POST",
-        "path": "ai-shorts",
-        "responseMode": "lastNode",
-        "options": {}
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
       },
-      "id": "b1c0e0a0-0000-4000-8000-000000000001",
-      "name": "Topic webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [240, 300],
-      "webhookId": "ai-shorts-topic"
+      "id": "n01",
+      "name": "09:00 daily",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        280
+      ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.SHORTS_API_BASE}}/v1/pipeline",
-        "sendHeaders": true,
-        "headerParameters": {
+        "url": "https://api.apify.com/v2/acts/apify~instagram-reel-scraper/run-sync-get-dataset-items",
+        "sendQuery": true,
+        "queryParameters": {
           "parameters": [
             {
-              "name": "Content-Type",
-              "value": "application/json"
+              "name": "token",
+              "value": "={{$credentials.httpQueryAuth.value}}"
             }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ topic: $json.body.topic || $json.topic, script_provider: 'auto', voice_provider: 'auto', publish: true, dry_run: true, scheduled_at: $json.body.scheduled_at || null }) }}",
+        "jsonBody": "={{ JSON.stringify({ username: ['fieldnotes'], resultsLimit: 10 }) }}",
         "options": {
-          "timeout": 180000
+          "timeout": 120000
         }
       },
-      "id": "b1c0e0a0-0000-4000-8000-000000000002",
-      "name": "Generate and render",
+      "id": "n02",
+      "name": "Apify \u2014 scrape Reels",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [560, 300]
+      "position": [
+        520,
+        280
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "apifyApiToken",
+          "name": "Apify API token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
-        "content": "## Portfolio demo\n\nPOST `{ \"topic\": \"how to explain a hard idea\" }` to this webhook.\n\nThe pipeline writes the script, voiceover, vertical MP4, and mock Instagram, TikTok, and YouTube receipts. `dry_run` stays true so nothing is posted.\n\nSet `SHORTS_API_BASE` on the n8n instance, for example `http://127.0.0.1:8080`. Start the API with `shorts-pipeline serve`.\n\nThe same job from a shell:\n\n`shorts-pipeline run --topic \"how to explain a hard idea\" --publish`",
-        "height": 360,
-        "width": 420
+        "jsCode": "const rows = items.map(i => i.json);\nconst ranked = rows.map(r => ({...r, engagement: ((r.likesCount||r.likes||0)+(r.commentsCount||r.comments||0))/Math.max(r.videoViewCount||r.views||1,1)})).sort((a,b)=>b.engagement-a.engagement);\nreturn ranked.map(json => ({json}));"
       },
-      "id": "b1c0e0a0-0000-4000-8000-000000000003",
-      "name": "How to run",
+      "id": "n03",
+      "name": "Rank by views / engagement",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nstaticData.used = staticData.used || [];\nconst fresh = items.find(i => !staticData.used.includes(String(i.json.id||i.json.shortCode)));\nif (!fresh) return [{json:{newReel:false}}];\nconst id = String(fresh.json.id||fresh.json.shortCode);\nstaticData.used.push(id);\nreturn [{json:{...fresh.json, newReel:true, reelId:id}}];"
+      },
+      "id": "n04",
+      "name": "Dedupe check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.newReel}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "n05",
+      "name": "New Reel?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1380,
+        280
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "n06",
+      "name": "Already used \u2014 end",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$json.videoUrl || $json.video_url}}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "n07",
+      "name": "Download source MP4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        560
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "whisper-large-v3"
+            },
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "n08",
+      "name": "Transcribe (Whisper)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        560
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "groqApiKey",
+          "name": "Groq API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'llama-3.3-70b-versatile', response_format: {type:'json_object'}, messages: [{role:'system', content:'Write an original short. Never copy the transcript. Return JSON {hook, script, voiceover, scenes:[{prompt, narration}]}.'}, {role:'user', content: $json.text || ''} ] }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "n09",
+      "name": "Script + scene prompts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        840,
+        560
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "groqApiKey",
+          "name": "Groq API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "scenes"
+      },
+      "id": "n10",
+      "name": "Scenes",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        240,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://queue.fal.run/fal-ai/flux/dev",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ prompt: $json.prompt, image_size: 'portrait_16_9' }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "n11",
+      "name": "fal.ai Flux",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        860
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "falApiKey",
+          "name": "fal.ai API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://queue.fal.run/fal-ai/kling-video/v1/standard/image-to-video",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ prompt: $json.prompt, image_url: $json.image_url }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "n12",
+      "name": "fal.ai Kling / Veo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        760,
+        860
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "falApiKey",
+          "name": "fal.ai API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "n13",
+      "name": "Wait 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1040,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://queue.fal.run/requests/{{$json.request_id}}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "n14",
+      "name": "Poll fal status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1240,
+        860
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "falApiKey",
+          "name": "fal.ai API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.status}}",
+              "rightValue": "COMPLETED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "n15",
+      "name": "COMPLETED?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1500,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/{{$env.ELEVENLABS_VOICE_ID}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.voiceover, model_id: 'eleven_multilingual_v2' }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "n16",
+      "name": "ElevenLabs TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        1160
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "elevenApiKey",
+          "name": "ElevenLabs API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll"
+      },
+      "id": "n17",
+      "name": "Clips + voice",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        520,
+        1160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.creatomate.com/v1/renders",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ template_id: $env.CREATOMATE_TEMPLATE_ID, modifications: { Voice: $json.voice_url, Captions: $json.hook } }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "n18",
+      "name": "Creatomate render",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        760,
+        1160
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "creatomateApiKey",
+          "name": "Creatomate API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.creatomate.com/v1/renders/{{$json.id}}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "n19",
+      "name": "Render ready?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        1160
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "creatomateApiKey",
+          "name": "Creatomate API key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
+        "text": "={{$json.hook || 'Reel ready'}}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": [
+                {
+                  "text": "Approve",
+                  "additionalFields": {
+                    "callback_data": "approve"
+                  }
+                },
+                {
+                  "text": "Regenerate",
+                  "additionalFields": {
+                    "callback_data": "regenerate"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "additionalFields": {}
+      },
+      "id": "n20",
+      "name": "Send video + buttons",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        1160
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegramBot",
+          "name": "Telegram bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "Approve",
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.callback_data || $json.data}}",
+                    "rightValue": "approve",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "outputKey": "Regenerate",
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.callback_data || $json.data}}",
+                    "rightValue": "regenerate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "id": "n21",
+      "name": "Which button?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        240,
+        1480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/{{$env.INSTAGRAM_USER_ID}}/media",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ media_type: 'REELS', video_url: $json.video_url, caption: $json.caption, share_to_feed: true }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "n22",
+      "name": "IG container (REELS)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        1400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "metaToken",
+          "name": "Meta access token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.facebook.com/v21.0/{{$json.id}}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "status_code"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "n23",
+      "name": "status_code = FINISHED?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        1400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "metaToken",
+          "name": "Meta access token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/{{$env.INSTAGRAM_USER_ID}}/media_publish",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ creation_id: $('IG container (REELS)').item.json.id }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "n24",
+      "name": "media_publish",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1180,
+        1400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "metaToken",
+          "name": "Meta access token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.tiktokapis.com/v2/post/publish/video/init/",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ post_info: { title: $json.caption, privacy_level: 'SELF_ONLY' }, source_info: { source: 'FILE_UPLOAD', video_size: 1, chunk_size: 1, total_chunk_count: 1 }, dry_run: true }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "n25",
+      "name": "TikTok init",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1460,
+        1400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "tiktokToken",
+          "name": "TikTok access token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ snippet: { title: $json.caption, description: '#Shorts', categoryId: '22' }, status: { privacyStatus: 'private', selfDeclaredMadeForKids: false }, dry_run: true }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "n26",
+      "name": "YouTube Shorts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1740,
+        1400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "youtubeToken",
+          "name": "YouTube OAuth token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $getWorkflowStaticData('global');\ndata.posts = data.posts || [];\ndata.posts.push({ reelId: $json.reelId, permalink: $json.permalink || 'mock://post', at: new Date().toISOString() });\nreturn [{json:{logged:true, posts:data.posts.length}}];"
+      },
+      "id": "n27",
+      "name": "Log the post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        1620
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
+        "text": "Posted. Mock adapters did not call Instagram, TikTok, or YouTube.",
+        "additionalFields": {}
+      },
+      "id": "n28",
+      "name": "Posted",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1460,
+        1620
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegramBot",
+          "name": "Telegram bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Regenerate loops to Script + scene prompts (step 8) or fal.ai Kling / Veo (step 11). It does not rerun the scrape. Credentials are n8n credential refs, never raw keys. Social HTTP nodes send dry_run:true until a live client is approved.",
+        "height": 140,
+        "width": 360
+      },
+      "id": "note1",
+      "name": "Notes",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [240, 40]
+      "position": [
+        240,
+        80
+      ]
     }
   ],
   "connections": {
-    "Topic webhook": {
+    "09:00 daily": {
       "main": [
         [
           {
-            "node": "Generate and render",
+            "node": "Apify \u2014 scrape Reels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify \u2014 scrape Reels": {
+      "main": [
+        [
+          {
+            "node": "Rank by views / engagement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rank by views / engagement": {
+      "main": [
+        [
+          {
+            "node": "Dedupe check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedupe check": {
+      "main": [
+        [
+          {
+            "node": "New Reel?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Reel?": {
+      "main": [
+        [
+          {
+            "node": "Download source MP4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already used \u2014 end",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download source MP4": {
+      "main": [
+        [
+          {
+            "node": "Transcribe (Whisper)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe (Whisper)": {
+      "main": [
+        [
+          {
+            "node": "Script + scene prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Script + scene prompts": {
+      "main": [
+        [
+          {
+            "node": "Scenes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scenes": {
+      "main": [
+        [
+          {
+            "node": "fal.ai Flux",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fal.ai Flux": {
+      "main": [
+        [
+          {
+            "node": "fal.ai Kling / Veo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fal.ai Kling / Veo": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s": {
+      "main": [
+        [
+          {
+            "node": "Poll fal status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll fal status": {
+      "main": [
+        [
+          {
+            "node": "COMPLETED?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "COMPLETED?": {
+      "main": [
+        [
+          {
+            "node": "ElevenLabs TTS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ElevenLabs TTS": {
+      "main": [
+        [
+          {
+            "node": "Clips + voice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clips + voice": {
+      "main": [
+        [
+          {
+            "node": "Creatomate render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Creatomate render": {
+      "main": [
+        [
+          {
+            "node": "Render ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render ready?": {
+      "main": [
+        [
+          {
+            "node": "Send video + buttons",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send video + buttons": {
+      "main": [
+        [
+          {
+            "node": "Which button?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Which button?": {
+      "main": [
+        [
+          {
+            "node": "IG container (REELS)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Script + scene prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IG container (REELS)": {
+      "main": [
+        [
+          {
+            "node": "status_code = FINISHED?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "status_code = FINISHED?": {
+      "main": [
+        [
+          {
+            "node": "media_publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "media_publish": {
+      "main": [
+        [
+          {
+            "node": "TikTok init",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TikTok init": {
+      "main": [
+        [
+          {
+            "node": "YouTube Shorts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Shorts": {
+      "main": [
+        [
+          {
+            "node": "Log the post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log the post": {
+      "main": [
+        [
+          {
+            "node": "Posted",
             "type": "main",
             "index": 0
           }
@@ -69,11 +1060,11 @@
   },
   "active": false,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_ERROR_WORKFLOW_ID"
   },
-  "versionId": "1",
   "meta": {
-    "templateCredsSetupCompleted": true
+    "templateCredsSetupCompleted": false
   },
   "tags": []
 }

@@ -1,78 +1,91 @@
 {
-  "name": "AI Shorts — topic to mock publish",
+  "name": "Daily Instagram Reels Pipeline",
   "flow": [
     {
       "id": 1,
       "module": "gateway:CustomWebHook",
-      "version": 1,
-      "parameters": {
-        "hook": 1,
-        "maxResults": 1
-      },
       "mapper": {},
-      "metadata": {
-        "designer": { "x": 0, "y": 0 },
-        "restore": {
-          "parameters": {
-            "hook": { "data": { "editable": "true" }, "label": "Topic webhook" }
-          }
-        },
-        "expect": [
-          { "name": "topic", "type": "text", "label": "Topic" },
-          { "name": "scheduled_at", "type": "text", "label": "Schedule (optional ISO time)" }
-        ]
-      }
+      "parameters": {"hook": 1},
+      "metadata": {"designer": {"x": 0, "y": 0}, "expect": [{"name": "topic", "type": "text"}]}
     },
     {
       "id": 2,
       "module": "http:ActionSendData",
-      "version": 3,
-      "parameters": {
-        "handleErrors": true,
-        "useNewZLibDeCompress": true
-      },
       "mapper": {
-        "url": "{{var.shorts_api_base}}/v1/pipeline",
+        "url": "https://api.apify.com/v2/acts/apify~instagram-reel-scraper/run-sync-get-dataset-items",
         "method": "post",
-        "headers": [
-          { "name": "Content-Type", "value": "application/json" }
-        ],
-        "bodyType": "raw",
-        "contentType": "application/json",
-        "body": "{\"topic\":\"{{1.topic}}\",\"script_provider\":\"auto\",\"voice_provider\":\"auto\",\"publish\":true,\"dry_run\":true,\"scheduled_at\":{{ifempty(1.scheduled_at, \"null\")}}}",
-        "parseResponse": true,
-        "timeout": 180
+        "body": "{\"username\":[\"fieldnotes\"],\"resultsLimit\":10}"
       },
-      "metadata": {
-        "designer": { "x": 300, "y": 0 },
-        "expect": [
-          { "name": "video_path", "type": "text" },
-          { "name": "receipts", "type": "array" },
-          { "name": "script", "type": "collection" }
-        ]
-      }
+      "metadata": {"designer": {"x": 300, "y": 0}}
+    },
+    {
+      "id": 3,
+      "module": "builtin:BasicRouter",
+      "mapper": {},
+      "metadata": {"designer": {"x": 600, "y": 0}, "note": "Dedupe: skip reel ids already stored. New reel continues."}
+    },
+    {
+      "id": 4,
+      "module": "http:ActionSendData",
+      "mapper": {
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "method": "post"
+      },
+      "metadata": {"designer": {"x": 900, "y": 0}, "note": "Whisper. Free default is Groq whisper-large-v3."}
+    },
+    {
+      "id": 5,
+      "module": "http:ActionSendData",
+      "mapper": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "method": "post",
+        "body": "{\"response_format\":{\"type\":\"json_object\"}}"
+      },
+      "metadata": {"designer": {"x": 1200, "y": 0}, "note": "Original JSON: hook, script, voiceover, scenes[]. Never copy the transcript."}
+    },
+    {
+      "id": 6,
+      "module": "http:ActionSendData",
+      "mapper": {"url": "https://queue.fal.run/fal-ai/flux/dev", "method": "post"},
+      "metadata": {"designer": {"x": 1500, "y": 0}, "note": "Flux when FAL_KEY is set. Free default is a generated plate."}
+    },
+    {
+      "id": 7,
+      "module": "http:ActionSendData",
+      "mapper": {"url": "https://queue.fal.run/fal-ai/kling-video/v1/standard/image-to-video", "method": "post"},
+      "metadata": {"designer": {"x": 1800, "y": 0}, "note": "Submit, wait, poll until COMPLETED or timeout. Free default is Ken Burns."}
+    },
+    {
+      "id": 8,
+      "module": "http:ActionSendData",
+      "mapper": {"url": "https://api.elevenlabs.io/v1/text-to-speech/voice", "method": "post"},
+      "metadata": {"designer": {"x": 2100, "y": 0}, "note": "ElevenLabs when keyed. Free default is Edge TTS."}
+    },
+    {
+      "id": 9,
+      "module": "http:ActionSendData",
+      "mapper": {"url": "https://api.creatomate.com/v1/renders", "method": "post"},
+      "metadata": {"designer": {"x": 2400, "y": 0}, "note": "Creatomate when keyed. Free default is ffmpeg or the in-browser encoder."}
+    },
+    {
+      "id": 10,
+      "module": "telegram:ActionSendReply",
+      "mapper": {"text": "Approve or Regenerate"},
+      "metadata": {"designer": {"x": 2700, "y": 0}, "note": "Inline Approve and Regenerate. Regenerate redoes the script or one scene."}
+    },
+    {
+      "id": 11,
+      "module": "http:ActionSendData",
+      "mapper": {
+        "url": "https://graph.facebook.com/v21.0/{ig-user-id}/media",
+        "method": "post",
+        "body": "{\"media_type\":\"REELS\",\"video_url\":\"\",\"caption\":\"\",\"dry_run\":true}"
+      },
+      "metadata": {"designer": {"x": 3000, "y": 0}, "note": "Then poll status_code=FINISHED and POST media_publish. Also record TikTok and YouTube Shorts payloads. dry_run stays true."}
     }
   ],
   "metadata": {
     "version": 1,
-    "instant": true,
-    "scenario": {
-      "roundtrips": 1,
-      "maxErrors": 3,
-      "autoCommit": true,
-      "autoCommitTriggerLast": true,
-      "sequential": false,
-      "confidential": false,
-      "dataloss": false,
-      "dlq": false,
-      "freshVariables": false
-    },
-    "designer": { "orphans": [] },
-    "notes": [
-      {
-        "moduleId": 2,
-        "content": "Portfolio demo. Create a scenario variable shorts_api_base, for example http://127.0.0.1:8080, and run shorts-pipeline serve. dry_run true means the three platform adapters save their payloads and do not post. CLI equivalent: shorts-pipeline run --topic \"...\" --publish"
-      }
-    ]
+    "notes": "Portfolio demo. Map credentials in Make. Do not put tokens in this file. Social publish is dry_run."
   }
 }

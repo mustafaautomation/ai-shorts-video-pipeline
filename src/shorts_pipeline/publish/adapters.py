@@ -118,6 +118,14 @@ class InstagramReelsAdapter:
                     },
                 },
                 {
+                    "method": "GET",
+                    "url": "https://graph.facebook.com/v21.0/{container-id}",
+                    "query": {"fields": "status_code"},
+                    "until": {"field": "status_code", "equals": "FINISHED"},
+                    "interval_seconds": 5,
+                    "timeout_seconds": 120,
+                },
+                {
                     "method": "POST",
                     "url": f"https://graph.facebook.com/v21.0/{user}/media_publish",
                     "headers": {"Authorization": f"Bearer {_redact(self.access_token, 'TOKEN')}"},
