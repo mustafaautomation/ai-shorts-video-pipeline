@@ -18,6 +18,15 @@ from shorts_pipeline.models import PublishReceipt, Script
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_GRAPH_API_VERSION = "v21.0"
+
+
+def graph_api_base() -> str:
+    """Graph API root. GRAPH_API_VERSION is the one setting; empty means the default."""
+    version = os.getenv("GRAPH_API_VERSION", "").strip() or DEFAULT_GRAPH_API_VERSION
+    return f"https://graph.facebook.com/{version}"
+
+
 class RealPublishDisabled(RuntimeError):
     """Raised instead of calling Instagram, TikTok, or YouTube."""
 
@@ -103,12 +112,13 @@ class InstagramReelsAdapter:
 
     def build_request(self, job: PublishJob) -> dict:
         user = self.user_id or "{ig-user-id}"
+        graph = graph_api_base()
         return {
             "platform": self.platform,
             "steps": [
                 {
                     "method": "POST",
-                    "url": f"https://graph.facebook.com/v21.0/{user}/media",
+                    "url": f"{graph}/{user}/media",
                     "headers": {"Authorization": f"Bearer {_redact(self.access_token, 'TOKEN')}"},
                     "json": {
                         "media_type": "REELS",
@@ -119,7 +129,7 @@ class InstagramReelsAdapter:
                 },
                 {
                     "method": "GET",
-                    "url": "https://graph.facebook.com/v21.0/{container-id}",
+                    "url": f"{graph}/{{container-id}}",
                     "query": {"fields": "status_code"},
                     "until": {"field": "status_code", "equals": "FINISHED"},
                     "interval_seconds": 5,
@@ -127,7 +137,7 @@ class InstagramReelsAdapter:
                 },
                 {
                     "method": "POST",
-                    "url": f"https://graph.facebook.com/v21.0/{user}/media_publish",
+                    "url": f"{graph}/{user}/media_publish",
                     "headers": {"Authorization": f"Bearer {_redact(self.access_token, 'TOKEN')}"},
                     "json": {"creation_id": "<id from step 1>"},
                 },

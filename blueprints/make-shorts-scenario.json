@@ -14,7 +14,7 @@
       "mapper": {
         "url": "https://api.apify.com/v2/acts/apify~instagram-reel-scraper/run-sync-get-dataset-items",
         "method": "post",
-        "body": "{\"username\":[\"fieldnotes\"],\"resultsLimit\":10}"
+        "body": "{\"username\":[\"REPLACE_WITH_SOURCE_USERNAME\"],\"resultsLimit\":10}"
       },
       "metadata": {"designer": {"x": 300, "y": 0}}
     },

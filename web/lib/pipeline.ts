@@ -114,6 +114,11 @@ export type PublishReceipt = {
   request: Record<string, unknown>;
 };
 
+// One setting, shared with the Python adapters and the n8n blueprint.
+// next.config.mjs passes GRAPH_API_VERSION through to the browser bundle.
+const GRAPH_API_VERSION = process.env.GRAPH_API_VERSION || "v21.0";
+const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+
 export function mockReceipts(hook: string, topic: string): PublishReceipt[] {
   const caption = `${hook}\n\n#shorts #reels #learnontiktok`;
   return [
@@ -123,18 +128,18 @@ export function mockReceipts(hook: string, topic: string): PublishReceipt[] {
         steps: [
           {
             method: "POST",
-            url: "https://graph.facebook.com/v21.0/{ig-user-id}/media",
+            url: `${GRAPH_API_BASE}/{ig-user-id}/media`,
             json: { media_type: "REELS", caption, share_to_feed: true, video_url: "blob://reel.mp4" },
           },
           {
             method: "GET",
-            url: "https://graph.facebook.com/v21.0/{container-id}",
+            url: `${GRAPH_API_BASE}/{container-id}`,
             query: { fields: "status_code" },
             until: { field: "status_code", equals: "FINISHED" },
           },
           {
             method: "POST",
-            url: "https://graph.facebook.com/v21.0/{ig-user-id}/media_publish",
+            url: `${GRAPH_API_BASE}/{ig-user-id}/media_publish`,
             json: { creation_id: "<id from step 1>" },
           },
         ],
