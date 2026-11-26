@@ -71,6 +71,8 @@
     <div class="nd" style="--c:#00bb88"><div class="t">Aggregate</div><div class="n">Aggregate clips</div><div class="a">all scenes → one item</div></div>
     <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Voice needed?</div><div class="a">skipped on Redo clips</div></div>
     <div class="nd" style="--c:#ef4444"><div class="t">HTTP</div><div class="n">ElevenLabs TTS</div><div class="a">else Edge TTS</div></div>
+    <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Upload voice</div><div class="a">PUT to your storage</div></div>
+    <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Voice URL</div><div class="a">public link for Creatomate</div></div>
     <div class="nd" style="--c:#00bb88"><div class="t">Merge</div><div class="n">Clips + voice</div></div>
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">Creatomate render</div><div class="a">else browser / ffmpeg</div></div>
     <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait 15s — render</div></div>
@@ -82,15 +84,16 @@
   <div class="lane">5 · Ask the human</div>
   <div class="row">
     <div class="nd" style="--c:#2ca5e0"><div class="t">Telegram</div><div class="n">Send video + buttons</div><div class="a">Approve / Rewrite script / Redo clips / Reject</div></div>
-    <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait for tap</div><div class="a">resume URL · 24 h limit</div></div>
+    <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait for tap</div><div class="a">resume URL · 24 h = reject</div></div>
     <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Regeneration budget</div><div class="a">MAX_REGENERATIONS per run</div></div>
     <div class="nd" style="--c:#00c571"><div class="t">Switch</div><div class="n">Which button?</div><div class="a">approve · script · clips · cap · reject · none</div></div>
-    <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Log abandoned reel</div><div class="a">cap or reject</div></div>
+    <div class="nd" style="--c:#7c3aed"><div class="t">Store</div><div class="n">Log abandoned reel</div><div class="a">cap · reject · no answer</div></div>
     <div class="nd" style="--c:#2ca5e0"><div class="t">Telegram</div><div class="n">Reel abandoned</div><div class="a">ends the run</div></div>
   </div>
   <div class="lane">6 · Publish, then log</div>
   <div class="row">
     <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Dry run?</div><div class="a">PUBLISH_DRY_RUN, default true</div></div>
+    <div class="nd" style="--c:#00c571"><div class="t">IF</div><div class="n">Live client approved?</div><div class="a">LIVE_PUBLISH_APPROVED · else stop</div></div>
     <div class="nd" style="--c:#f59e0b"><div class="t">Code</div><div class="n">Mock publish (dry run)</div><div class="a">nothing sent</div></div>
     <div class="nd" style="--c:#2196F3"><div class="t">HTTP</div><div class="n">IG container (REELS)</div><div class="a">live only</div></div>
     <div class="nd" style="--c:#7e62cc"><div class="t">Wait</div><div class="n">Wait 10s — container</div></div>
