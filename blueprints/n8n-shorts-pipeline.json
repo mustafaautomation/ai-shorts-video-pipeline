@@ -44,6 +44,12 @@
               "type": "boolean"
             },
             {
+              "id": "cfg-live",
+              "name": "liveApproved",
+              "value": "={{ $env.LIVE_PUBLISH_APPROVED === 'approved' }}",
+              "type": "boolean"
+            },
+            {
               "id": "cfg-attempts",
               "name": "maxReelAttempts",
               "value": "={{ Number($env.MAX_REEL_ATTEMPTS || 3) }}",
@@ -899,7 +905,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ text: $json.voiceover, model_id: 'eleven_multilingual_v2' }) }}",
         "options": {
-          "timeout": 60000
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
         }
       },
       "id": "n37",
@@ -922,11 +933,55 @@
     },
     {
       "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.VOICE_UPLOAD_BASE_URL }}/{{ $('Parse script').last().json.reelId }}-{{ $('Cost cap check').last().json.pass }}.mp3",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "n38",
+      "name": "Upload voice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        2380
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "voiceStorageToken",
+          "name": "Voice storage token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Creatomate fetches the voiceover over HTTPS, so it must be publicly readable.\n// VOICE_PUBLIC_BASE_URL is where the storage behind VOICE_UPLOAD_BASE_URL serves files from.\nconst name = `${$('Parse script').last().json.reelId}-${$('Cost cap check').last().json.pass}.mp3`;\nreturn [{ json: { voice_url: `${$env.VOICE_PUBLIC_BASE_URL}/${name}` } }];"
+      },
+      "id": "n39",
+      "name": "Voice URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        2380
+      ]
+    },
+    {
+      "parameters": {
         "mode": "combine",
         "combineBy": "combineAll",
         "options": {}
       },
-      "id": "n38",
+      "id": "n40",
       "name": "Clips + voice",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
@@ -943,12 +998,12 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ template_id: $env.CREATOMATE_TEMPLATE_ID, modifications: { Voice: $('ElevenLabs TTS').last().json.voice_url, Captions: $('Parse script').last().json.hook, ...Object.fromEntries($json.clips.map((clip, index) => ['Clip-' + (index + 1), clip.clip_url])) } }) }}",
+        "jsonBody": "={{ JSON.stringify({ template_id: $env.CREATOMATE_TEMPLATE_ID, modifications: { Voice: $('Voice URL').last().json.voice_url, Captions: $('Parse script').last().json.hook, ...Object.fromEntries($json.clips.map((clip, index) => ['Clip-' + (index + 1), clip.clip_url])) } }) }}",
         "options": {
           "timeout": 60000
         }
       },
-      "id": "n39",
+      "id": "n41",
       "name": "Creatomate render",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -971,7 +1026,7 @@
         "amount": 15,
         "unit": "seconds"
       },
-      "id": "n40",
+      "id": "n42",
       "name": "Wait 15s — render",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -990,7 +1045,7 @@
           "timeout": 30000
         }
       },
-      "id": "n41",
+      "id": "n43",
       "name": "Poll render",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1013,7 +1068,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "// Carry the submit response forward and count this poll.\nconst prev = $('Wait 15s — render').item.json;\nreturn { json: { ...prev, status: $json.status, url: $json.url, attempt: (prev.attempt || 0) + 1 } };"
       },
-      "id": "n42",
+      "id": "n44",
       "name": "Count render poll",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1046,7 +1101,7 @@
         },
         "options": {}
       },
-      "id": "n43",
+      "id": "n45",
       "name": "Render ready?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -1088,7 +1143,7 @@
         },
         "options": {}
       },
-      "id": "n44",
+      "id": "n46",
       "name": "Render tries left?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -1101,7 +1156,7 @@
       "parameters": {
         "errorMessage": "=Creatomate render not ready after {{ $json.attempt }} polls (last status: {{ $json.status }})."
       },
-      "id": "n45",
+      "id": "n47",
       "name": "Render timed out",
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
@@ -1160,7 +1215,7 @@
           "appendAttribution": false
         }
       },
-      "id": "n46",
+      "id": "n48",
       "name": "Send video + buttons",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -1186,7 +1241,7 @@
         "resumeUnit": "hours",
         "options": {}
       },
-      "id": "n47",
+      "id": "n49",
       "name": "Wait for tap",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -1197,9 +1252,9 @@
     },
     {
       "parameters": {
-        "jsCode": "// One run of this node per approval round, so $runIndex is the number of\n// regenerations this execution has already done.\nconst cfg = $('Run config').first().json;\nconst tapped = $json.query?.choice || 'none';\nconst regenerationsUsed = $runIndex;\nconst wantsRegeneration = tapped === 'rewrite_script' || tapped === 'redo_clips';\nconst choice = wantsRegeneration && regenerationsUsed >= cfg.maxRegenerations ? 'cap_reached' : tapped;\nreturn [{ json: { choice, tapped, regenerationsUsed, maxRegenerations: cfg.maxRegenerations } }];"
+        "jsCode": "// One run of this node per approval round, so $runIndex is the number of\n// regenerations this execution has already done.\nconst cfg = $('Run config').first().json;\nconst tapped = $json.query?.choice || 'no_answer';\nconst regenerationsUsed = $runIndex;\nconst wantsRegeneration = tapped === 'rewrite_script' || tapped === 'redo_clips';\nconst choice = wantsRegeneration && regenerationsUsed >= cfg.maxRegenerations ? 'cap_reached' : tapped;\nreturn [{ json: { choice, tapped, regenerationsUsed, maxRegenerations: cfg.maxRegenerations } }];"
       },
-      "id": "n48",
+      "id": "n50",
       "name": "Regeneration budget",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1338,7 +1393,7 @@
           "fallbackOutput": "extra"
         }
       },
-      "id": "n49",
+      "id": "n51",
       "name": "Which button?",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -1349,9 +1404,9 @@
     },
     {
       "parameters": {
-        "jsCode": "// Rejected, or out of regenerations: record the reel so no later run picks it.\nconst data = $getWorkflowStaticData('global');\ndata.abandoned = data.abandoned || [];\nconst reelId = String($('Dedupe check').first().json.reelId);\nconst reason = $json.choice === 'reject' ? 'rejected' : 'regeneration_cap';\nif (!data.abandoned.some(entry => String(entry.reelId) === reelId)) {\n  data.abandoned.push({ reelId, reason, at: new Date().toISOString() });\n}\nreturn [{ json: { reelId, abandoned: true, reason, maxRegenerations: $json.maxRegenerations } }];"
+        "jsCode": "// Rejected, or out of regenerations: record the reel so no later run picks it.\nconst data = $getWorkflowStaticData('global');\ndata.abandoned = data.abandoned || [];\nconst reelId = String($('Dedupe check').first().json.reelId);\n// Anything that is not a recognised tap (the 24 h wait limit ran out) counts as a rejection.\nconst reason = $json.choice === 'reject' ? 'rejected' : $json.choice === 'cap_reached' ? 'regeneration_cap' : 'no_answer';\nif (!data.abandoned.some(entry => String(entry.reelId) === reelId)) {\n  data.abandoned.push({ reelId, reason, at: new Date().toISOString() });\n}\nreturn [{ json: { reelId, abandoned: true, reason, maxRegenerations: $json.maxRegenerations } }];"
       },
-      "id": "n50",
+      "id": "n52",
       "name": "Log abandoned reel",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1364,12 +1419,12 @@
       "parameters": {
         "operation": "sendMessage",
         "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
-        "text": "={{ $json.reason === 'rejected' ? 'Rejected.' : 'Regeneration cap reached (' + $json.maxRegenerations + ' per run).' }} Nothing was posted. This reel is logged as abandoned and will not be picked again.",
+        "text": "={{ $json.reason === 'rejected' ? 'Rejected.' : $json.reason === 'no_answer' ? 'No answer within 24 hours, treated as a rejection.' : 'Regeneration cap reached (' + $json.maxRegenerations + ' per run).' }} Nothing was posted. This reel is logged as abandoned and will not be picked again.",
         "additionalFields": {
           "appendAttribution": false
         }
       },
-      "id": "n51",
+      "id": "n53",
       "name": "Reel abandoned",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -1383,17 +1438,6 @@
           "name": "Telegram bot"
         }
       }
-    },
-    {
-      "parameters": {},
-      "id": "n52",
-      "name": "No answer — end",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [
-        1680,
-        2940
-      ]
     },
     {
       "parameters": {
@@ -1420,7 +1464,7 @@
         },
         "options": {}
       },
-      "id": "n53",
+      "id": "n54",
       "name": "Dry run?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -1433,7 +1477,7 @@
       "parameters": {
         "jsCode": "// Demo mode. Builds the requests a live run would send and sends none of them.\nconst cfg = $('Run config').first().json;\nconst caption = $('Parse script').last().json.caption;\nconst videoUrl = $('Count render poll').last().json.url;\nconst graph = 'https://graph.facebook.com/' + cfg.graphApiVersion;\nconst requests = [\n  { platform: 'instagram_reels', steps: [\n    { method: 'POST', url: graph + '/{ig-user-id}/media', json: { media_type: 'REELS', video_url: videoUrl, caption, share_to_feed: true } },\n    { method: 'GET', url: graph + '/{container-id}', query: { fields: 'status_code' } },\n    { method: 'POST', url: graph + '/{ig-user-id}/media_publish', json: { creation_id: '<id from step 1>' } } ] },\n  { platform: 'tiktok', method: 'POST', url: 'https://open.tiktokapis.com/v2/post/publish/video/init/' },\n  { platform: 'youtube_shorts', method: 'POST', url: 'https://www.googleapis.com/upload/youtube/v3/videos' },\n];\nreturn [{ json: { dry_run: true, sent: false, permalink: 'mock://post', requests } }];"
       },
-      "id": "n54",
+      "id": "n55",
       "name": "Mock publish (dry run)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1455,7 +1499,7 @@
           "timeout": 60000
         }
       },
-      "id": "n55",
+      "id": "n56",
       "name": "IG container (REELS)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1478,7 +1522,7 @@
         "amount": 10,
         "unit": "seconds"
       },
-      "id": "n56",
+      "id": "n57",
       "name": "Wait 10s — container",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -1506,7 +1550,7 @@
           "timeout": 30000
         }
       },
-      "id": "n57",
+      "id": "n58",
       "name": "Poll container status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1529,7 +1573,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "// Carry the submit response forward and count this poll.\nconst prev = $('Wait 10s — container').item.json;\nreturn { json: { ...prev, status_code: $json.status_code, attempt: (prev.attempt || 0) + 1 } };"
       },
-      "id": "n58",
+      "id": "n59",
       "name": "Count container poll",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1562,7 +1606,7 @@
         },
         "options": {}
       },
-      "id": "n59",
+      "id": "n60",
       "name": "status_code = FINISHED?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -1604,7 +1648,7 @@
         },
         "options": {}
       },
-      "id": "n60",
+      "id": "n61",
       "name": "Container tries left?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -1617,7 +1661,7 @@
       "parameters": {
         "errorMessage": "=Instagram container not FINISHED after {{ $json.attempt }} polls (last status_code: {{ $json.status_code }}). Nothing was published."
       },
-      "id": "n61",
+      "id": "n62",
       "name": "Container timed out",
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
@@ -1639,7 +1683,7 @@
           "timeout": 60000
         }
       },
-      "id": "n62",
+      "id": "n63",
       "name": "media_publish",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1670,7 +1714,7 @@
           "timeout": 30000
         }
       },
-      "id": "n63",
+      "id": "n64",
       "name": "TikTok init",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1701,7 +1745,7 @@
           "timeout": 30000
         }
       },
-      "id": "n64",
+      "id": "n65",
       "name": "YouTube Shorts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1723,7 +1767,7 @@
       "parameters": {
         "jsCode": "// The only write to the used-reel list. It runs after the publish steps, so a\n// failed or abandoned run leaves the reel free for a later run.\nconst data = $getWorkflowStaticData('global');\ndata.used = data.used || [];\nconst reelId = String($('Dedupe check').first().json.reelId);\nif (!data.used.includes(reelId)) data.used.push(reelId);\nreturn [{ json: { reelId, permalink: $json.permalink, dedupeLogged: true, usedCount: data.used.length } }];"
       },
-      "id": "n65",
+      "id": "n66",
       "name": "Write dedupe log",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1736,7 +1780,7 @@
       "parameters": {
         "jsCode": "const data = $getWorkflowStaticData('global');\ndata.posts = data.posts || [];\nif (!data.posts.some(post => String(post.reelId) === String($json.reelId))) {\n  data.posts.push({ reelId: $json.reelId, permalink: $json.permalink || 'mock://post', at: new Date().toISOString() });\n}\nreturn [{json:{logged:true, reelId: $json.reelId, posts:data.posts.length}}];"
       },
-      "id": "n66",
+      "id": "n67",
       "name": "Log the post",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1749,12 +1793,12 @@
       "parameters": {
         "operation": "sendMessage",
         "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
-        "text": "={{ $('Run config').first().json.publishDryRun ? 'Dry run. Approved and logged, but nothing was sent to Instagram, TikTok, or YouTube. Set PUBLISH_DRY_RUN=false to go live.' : 'Posted to Instagram. TikTok and YouTube were sent with dry_run:true.' }}",
+        "text": "={{ $('Run config').first().json.publishDryRun ? 'Dry run. Approved and logged, but nothing was sent to Instagram, TikTok, or YouTube.' : 'Posted to Instagram. TikTok and YouTube were sent with dry_run:true.' }}",
         "additionalFields": {
           "appendAttribution": false
         }
       },
-      "id": "n67",
+      "id": "n68",
       "name": "Posted",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -1768,6 +1812,53 @@
           "name": "Telegram bot"
         }
       }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "live-ok",
+              "leftValue": "={{ $('Run config').first().json.liveApproved }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n69",
+      "name": "Live client approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        3600
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "Live publish is disabled in this demo. PUBLISH_DRY_RUN=false alone does not post; a live client must be approved and wired first (LIVE_PUBLISH_APPROVED). Nothing was sent."
+      },
+      "id": "n70",
+      "name": "Live publish disabled",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        720,
+        3600
+      ]
     },
     {
       "parameters": {
@@ -1831,7 +1922,7 @@
     },
     {
       "parameters": {
-        "content": "### 4 · Collect clips, voice, render\nAggregate clips turns the per-scene items into one item. Redo clips skips the voice call and reuses the last voiceover.",
+        "content": "### 4 · Collect clips, voice, render\nAggregate clips turns the per-scene items into one item. Redo clips skips the voice call and reuses the last voiceover. ElevenLabs audio is uploaded (PUT to VOICE_UPLOAD_BASE_URL) so Creatomate can fetch it from VOICE_PUBLIC_BASE_URL.",
         "height": 130,
         "width": 640
       },
@@ -1846,7 +1937,7 @@
     },
     {
       "parameters": {
-        "content": "### 5 · Ask the human\nThe buttons resume this execution: Approve, Rewrite script, Redo clips, and Reject. Rewrite script returns to lane 2, Redo clips to the cost cap check. Neither reruns the scrape. Reject, or a regeneration past the cap, logs the reel as abandoned. No tap in 24 hours ends the run.",
+        "content": "### 5 · Ask the human\nThe buttons resume this execution: Approve, Rewrite script, Redo clips, and Reject. Rewrite script returns to lane 2, Redo clips to the cost cap check. Neither reruns the scrape. Reject, a regeneration past the cap, or no tap in 24 hours logs the reel as abandoned.",
         "height": 150,
         "width": 640
       },
@@ -1861,7 +1952,7 @@
     },
     {
       "parameters": {
-        "content": "### 6 · Publish, then log\nDry run? is the guard: unless PUBLISH_DRY_RUN is set to false, the run takes Mock publish and no Instagram, TikTok or YouTube node is called. Write dedupe log is the only write to the used-reel list and runs last. Workflow static data is saved only for active (non-manual) executions.",
+        "content": "### 6 · Publish, then log\nTwo guards. Dry run? (PUBLISH_DRY_RUN, default true) sends the run to Mock publish. With it false, Live client approved? (LIVE_PUBLISH_APPROVED) must also be set, else the run stops with an error, as the Python pipeline does. No social node is called otherwise. Write dedupe log is the only write to the used-reel list and runs last. Workflow static data is saved only for active (non-manual) executions.",
         "height": 150,
         "width": 640
       },
@@ -2351,6 +2442,28 @@
       "main": [
         [
           {
+            "node": "Upload voice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload voice": {
+      "main": [
+        [
+          {
+            "node": "Voice URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Voice URL": {
+      "main": [
+        [
+          {
             "node": "Clips + voice",
             "type": "main",
             "index": 1
@@ -2463,7 +2576,7 @@
         ],
         [
           {
-            "node": "No answer — end",
+            "node": "Log abandoned reel",
             "type": "main",
             "index": 0
           }
@@ -2561,7 +2674,25 @@
         ],
         [
           {
+            "node": "Live client approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Live client approved?": {
+      "main": [
+        [
+          {
             "node": "IG container (REELS)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Live publish disabled",
             "type": "main",
             "index": 0
           }

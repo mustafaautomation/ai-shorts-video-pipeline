@@ -256,7 +256,7 @@ def test_n8n_clips_are_aggregated_before_the_merge() -> None:
     }
     assert merge_inputs == {
         ("Aggregate clips", 0),
-        ("ElevenLabs TTS", 1),
+        ("Voice URL", 1),
         ("Voice needed?", 1),
     }
     assert "$json.clips.map" in nodes["Creatomate render"]["parameters"]["jsonBody"]
@@ -302,7 +302,7 @@ def test_n8n_approval_has_three_choices_and_a_regeneration_cap() -> None:
         ["Cost cap check"],
         ["Log abandoned reel"],
         ["Log abandoned reel"],
-        ["No answer — end"],
+        ["Log abandoned reel"],
     ]
 
     # Rewrite script redoes the words; Redo clips keeps them. Neither reruns the scrape.
@@ -319,7 +319,6 @@ def test_n8n_approval_has_three_choices_and_a_regeneration_cap() -> None:
     assert "$env.MAX_REGENERATIONS" in _config(document)["maxRegenerations"]
     assert _outputs(document, "Log abandoned reel") == [["Reel abandoned"]]
     assert _targets(document, "Reel abandoned") == set()
-    assert _targets(document, "No answer — end") == set()
 
 
 def test_n8n_cost_cap_gates_every_paid_call() -> None:
@@ -381,7 +380,7 @@ def test_n8n_social_nodes_sit_behind_the_dry_run_guard() -> None:
     condition = guard["parameters"]["conditions"]["conditions"][0]
     assert condition["leftValue"] == "={{ $('Run config').first().json.publishDryRun }}"
     assert condition["operator"]["operation"] == "true"
-    assert _outputs(document, "Dry run?") == [["Mock publish (dry run)"], ["IG container (REELS)"]]
+    assert _outputs(document, "Dry run?") == [["Mock publish (dry run)"], ["Live client approved?"]]
 
     # The dry-run branch holds no HTTP node, so it cannot call anything.
     mock = nodes["Mock publish (dry run)"]
@@ -399,6 +398,20 @@ def test_n8n_social_nodes_sit_behind_the_dry_run_guard() -> None:
         "YouTube Shorts",
     ]
     open_paths = _reachable(document, TRIGGER, without=frozenset({"Dry run?"}))
+    # PUBLISH_DRY_RUN=false alone is not enough: a second switch must be set, otherwise the run
+    # stops with an error. That is what RealPublishDisabled does in the Python pipeline.
+    approval = nodes["Live client approved?"]
+    assert approval["type"] == "n8n-nodes-base.if"
+    assert "$env.LIVE_PUBLISH_APPROVED === 'approved'" in _config(document)["liveApproved"]
+    assert _outputs(document, "Live client approved?") == [
+        ["IG container (REELS)"],
+        ["Live publish disabled"],
+    ]
+    assert nodes["Live publish disabled"]["type"] == STOP
+    assert "Nothing was sent" in nodes["Live publish disabled"]["parameters"]["errorMessage"]
+    assert _targets(document, "Live publish disabled") == set()
+    gated = _reachable(document, "Dry run?", without=frozenset({"Live client approved?"}))
+    assert not set(social) & gated
     live_branch = _reachable(document, "IG container (REELS)")
     for name in social:
         assert name not in open_paths
@@ -461,7 +474,7 @@ def test_env_example_lists_every_variable_the_canvas_reads() -> None:
 def test_n8n_http_nodes_retry_and_time_out() -> None:
     document = _pipeline()
     http_nodes = [node for node in document["nodes"] if node["type"] == HTTP]
-    assert len(http_nodes) == 18
+    assert len(http_nodes) == 19
     for node in http_nodes:
         assert node["retryOnFail"] is True, node["name"]
         assert node["maxTries"] >= 3, node["name"]
@@ -518,3 +531,62 @@ def test_make_blueprint_covers_the_same_stages() -> None:
     assert "media_type" in blob
     assert "dry_run" in blob
     assert document["name"]
+    assert "fieldnotes" not in blob
+    assert "REPLACE_WITH_SOURCE_USERNAME" in blob
+
+
+def test_n8n_unanswered_approval_is_a_rejection() -> None:
+    document = _pipeline()
+    nodes = _by_name(document)
+    tap = nodes["Wait for tap"]["parameters"]
+    assert tap["limitWaitTime"] is True
+    assert (tap["resumeAmount"], tap["resumeUnit"]) == (24, "hours")
+    # A resume with no tap carries no choice; the budget node labels it no_answer.
+    budget = nodes["Regeneration budget"]["parameters"]["jsCode"]
+    assert "$json.query?.choice || 'no_answer'" in budget
+    # The Switch's fallback output (the last one) goes to the abandoned log, like Reject.
+    outputs = _outputs(document, "Which button?")
+    assert nodes["Which button?"]["parameters"]["options"]["fallbackOutput"] == "extra"
+    assert len(outputs) == 6
+    assert outputs[5] == ["Log abandoned reel"]
+    log = nodes["Log abandoned reel"]["parameters"]["jsCode"]
+    assert "'no_answer'" in log
+    assert "data.abandoned.push(" in log
+    notice = nodes["Reel abandoned"]
+    assert notice["type"] == "n8n-nodes-base.telegram"
+    assert "No answer within 24 hours" in notice["parameters"]["text"]
+    assert "No answer — end" not in nodes
+    # The notice is the end of the branch, and nothing publishes from it.
+    assert _reachable(document, "Log abandoned reel") == {"Log abandoned reel", "Reel abandoned"}
+
+
+def test_n8n_voice_is_uploaded_before_creatomate_fetches_it() -> None:
+    document = _pipeline()
+    nodes = _by_name(document)
+    assert nodes["ElevenLabs TTS"]["parameters"]["options"]["response"]["response"] == {
+        "responseFormat": "file"
+    }
+    assert _outputs(document, "ElevenLabs TTS") == [["Upload voice"]]
+    upload = nodes["Upload voice"]
+    assert upload["type"] == HTTP
+    assert upload["parameters"]["method"] == "PUT"
+    assert upload["parameters"]["contentType"] == "binaryData"
+    assert upload["parameters"]["inputDataFieldName"] == "data"
+    assert upload["parameters"]["url"].startswith("={{ $env.VOICE_UPLOAD_BASE_URL }}/")
+    assert _outputs(document, "Upload voice") == [["Voice URL"]]
+    voice_url = nodes["Voice URL"]["parameters"]["jsCode"]
+    assert "$env.VOICE_PUBLIC_BASE_URL" in voice_url
+    # Same object name on both sides, so the public URL points at what was uploaded.
+    name = "${$('Parse script').last().json.reelId}-${$('Cost cap check').last().json.pass}.mp3"
+    assert name in voice_url
+    assert (
+        "{{ $('Parse script').last().json.reelId }}-{{ $('Cost cap check').last().json.pass }}.mp3"
+        in (upload["parameters"]["url"])
+    )
+    # Creatomate reads the hosted URL, never the raw ElevenLabs response.
+    body = nodes["Creatomate render"]["parameters"]["jsonBody"]
+    assert "$('Voice URL').last().json.voice_url" in body
+    assert "ElevenLabs TTS" not in body
+    # The upload cannot be skipped on the way to the render, except on Redo clips.
+    without_upload = _reachable(document, "Voice needed?", without=frozenset({"Upload voice"}))
+    assert "Voice URL" not in without_upload
